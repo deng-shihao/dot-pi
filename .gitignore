@@ -1,0 +1,8 @@
+.DS_Store
+
+npm
+sessions
+
+auth.json
+models-store.json
+settings.json
