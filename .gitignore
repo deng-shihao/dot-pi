@@ -6,3 +6,5 @@ sessions
 auth.json
 models-store.json
 settings.json
+/pi-goal.json
+run-history.jsonl

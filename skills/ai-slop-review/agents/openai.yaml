@@ -1,4 +1,0 @@
-interface:
-  display_name: "AI Slop Review"
-  short_description: "Detect AI-generated code anti-patterns"
-  default_prompt: "Use $ai-slop-review to review the current diff or target files for AI-generated code anti-patterns and report findings."

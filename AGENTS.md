@@ -33,7 +33,7 @@
 - Do not leave temporary debug logging, prints, profiling instrumentation, or commented-out experiments in delivered code. Legitimate user-facing and operational logging is allowed.
 - Keep new and modified code cohesive. Do not make an existing oversized module larger without need, and do not perform a broad file split unless it belongs to the task.
 - Follow the repository's existing formatter, linter, naming, and organization conventions.
-- Do not use emojis in code or comments.
+- Write self-explanatory code; use comments only to explain intent, constraints, and non-obvious logic, and keep them accurate and synchronized with the code.
 - Use one line per paragraph or list item in plain Markdown, not semantic line breaks.
 
 ## Verification
