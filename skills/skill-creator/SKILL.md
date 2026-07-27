@@ -7,22 +7,6 @@ metadata:
 
 # Skill Creator
 
-This skill provides guidance for creating effective skills.
-
-## About Skills
-
-Skills are modular, self-contained folders that extend Codex's capabilities by providing
-specialized knowledge, workflows, and tools. Think of them as "onboarding guides" for specific
-domains or tasks—they transform Codex from a general-purpose agent into a specialized agent
-equipped with procedural knowledge that no model can fully possess.
-
-### What Skills Provide
-
-1. Specialized workflows - Multi-step procedures for specific domains
-2. Tool integrations - Instructions for working with specific file formats or APIs
-3. Domain expertise - Company-specific knowledge, schemas, business logic
-4. Bundled resources - Scripts, references, and assets for complex and repetitive tasks
-
 ## Core Principles
 
 ### Concise is Key
@@ -120,9 +104,9 @@ Files not intended to be loaded into context, but rather used within the output 
 - **Use cases**: Templates, images, icons, boilerplate code, fonts, sample documents that get copied or modified
 - **Benefits**: Separates output resources from documentation, enables Codex to use files without loading them into context
 
-#### What to Not Include in a Skill
+#### Skill File Boundaries
 
-A skill should only contain essential files that directly support its functionality. Do NOT create extraneous documentation or auxiliary files, including:
+A skill contains only the files that directly support its functionality. Do NOT create extraneous documentation:
 
 - README.md
 - INSTALLATION_GUIDE.md
@@ -217,7 +201,7 @@ Codex reads REDLINING.md or OOXML.md only when the user needs those features.
 
 **Important guidelines:**
 
-- **Avoid deeply nested references** - Keep references one level deep from SKILL.md. All reference files should link directly from SKILL.md.
+- **Keep references one level deep** from SKILL.md. All reference files should link directly from SKILL.md.
 - **Structure longer reference files** - For files longer than 100 lines, include a table of contents at the top so Codex can see the full scope when previewing.
 
 ## Skill Creation Process
@@ -255,9 +239,7 @@ For example, when building an image-editor skill, relevant questions include:
 - "What would a user say that should trigger this skill?"
 - "Where should I create this skill? If you do not have a preference, I will place it in `$CODEX_HOME/skills` (or `~/.codex/skills` when `CODEX_HOME` is unset) so Codex can discover it automatically."
 
-To avoid overwhelming users, avoid asking too many questions in a single message. Start with the most important questions and follow up as needed for better effectiveness.
-
-Conclude this step when there is a clear sense of the functionality the skill should support.
+Start with the most important questions and follow up as needed. Conclude this step when there is a clear sense of the functionality the skill should support.
 
 ### Step 2: Planning the Reusable Skill Contents
 

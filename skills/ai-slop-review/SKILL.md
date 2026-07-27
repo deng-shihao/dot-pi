@@ -1,10 +1,8 @@
 ---
 name: ai-slop-review
 description: >
-  Migrated from Claude agent. Use only when the user explicitly asks to run an AI slop review on a file, directory, or git diff.
+  Scan code for common AI-generated anti-patterns: defensive programming, band-aid patches, dead code, consistency violations, fragile patterns, and forced consolidation. Use when the user asks to review a file, directory, or git diff for AI slop.
 ---
-
-> Migrated from Claude subagent. In Codex this is exposed as a skill; map Claude-specific tool names to equivalent Codex tools when following the original instructions.
 
 # AI Slop Review Engine
 

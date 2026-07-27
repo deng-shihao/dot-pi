@@ -12,12 +12,6 @@ Produce natural, accurate Chinese translations that read as if written by a nati
 
 AI models produce predictable defects in Chinese translation: English word order calqued into Chinese, filler phrases added for politeness, over-emphasis not present in the source, and tone shifts. This skill provides a structured iterative workflow to eliminate these issues through comprehension, translation, and repeated polish passes.
 
-## When to Use
-
-- Translating documents, articles, or prose from English to Chinese
-- Improving or polishing an existing Chinese translation
-- Reviewing machine-translated Chinese content for quality
-
 ## When NOT to Use
 
 - Translating into languages other than Chinese

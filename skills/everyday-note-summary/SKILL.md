@@ -8,14 +8,6 @@ description: >
 
 # Everyday Note Summary
 
-## Quick Start
-
-Given a raw note:
-1. Prepend a summary block (date, topics).
-2. Group related content under `##` headings, merge duplicates.
-3. Fix spelling. Preserve code blocks and links.
-4. Rename to `YYYY-MM-DD-{brief-title}.md` if needed.
-
 ## File Naming
 
 Format: `YYYY-MM-DD-{brief-title}.md`
@@ -38,7 +30,7 @@ Topics:
 ## Workflow
 
 ### 1. Read and Summarize
-Read the full note. Write a structured summary block and insert at file start.
+Read the full note. Write a structured summary block (see Summary Block above) and insert at file start.
 
 ### 2. Restructure
 - Group related topics under `##` headings, `###` for subtopics.

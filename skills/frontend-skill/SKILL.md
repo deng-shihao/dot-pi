@@ -75,13 +75,7 @@ For app UI, organize around:
 - secondary context or inspector
 - one clear accent for action or state
 
-Avoid:
-
-- dashboard-card mosaics
-- thick borders on every region
-- decorative gradients behind routine product UI
-- multiple competing accent colors
-- ornamental icons that do not improve scanning
+Use flat backgrounds for routine product UI — gradients belong in marketing pages, not workspaces. Icons must improve scanning; remove any that don't.
 
 If a panel can become plain layout without losing meaning, remove the card treatment.
 
@@ -162,16 +156,6 @@ Motion rules:
 - No split-screen hero unless text sits on a calm, unified side.
 - No more than two typefaces without a clear reason.
 - No more than one accent color unless the product already has a strong system.
-
-## Reject These Failures
-
-- Generic SaaS card grid as the first impression
-- Beautiful image with weak brand presence
-- Strong headline with no clear action
-- Busy imagery behind text
-- Sections that repeat the same mood statement
-- Carousel with no narrative purpose
-- App UI made of stacked cards instead of layout
 
 ## Litmus Checks
 

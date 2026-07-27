@@ -6,11 +6,6 @@ description: "Use when tasks involve reading, creating, or reviewing PDF files w
 
 # PDF Skill
 
-## When to use
-- Read or review PDF content where layout and visuals matter.
-- Create PDFs programmatically with reliable formatting.
-- Validate final rendering before delivery.
-
 ## Workflow
 1. Prefer visual review: render PDF pages to PNGs and inspect them.
    - Use `pdftoppm` if available.

@@ -35,6 +35,6 @@ Once you've found the entrypoint, Read the contents and then recurse through all
 
 ### Part 6: Report
 
-Once you've read the paper, produce a summary of the paper into a markdown file at `./knowledge/summary_{tag}.md`. Notice that 1) use the local knowledge directory here (it's easier for me to open and reference here), not in `~/.cache`, and 2) generate some reasonable `tag` like e.g. `conditional_memory` or whatever seems appropriate given the paper. Probably make sure that the tag doesn't exist yet so you're not overwriting files.
+Produce a summary of the paper to `./knowledge/summary_{tag}.md` using the local `knowledge` directory (not `~/.cache`). Generate a reasonable `tag` from the paper's topic (e.g. `conditional_memory`) — ensure the filename doesn't already exist.
 
-As for the summary itself, remember that you're processing this paper within the context of the nanochat repository, so most often we will be interested in how to apply the paper and its lessons to the nanochat project. Therefore, you should feel free to "remind yourself" of the related nanochat code by reading the relevant parts, and then explicitly make the connection of how this paper might relate to nanochat or what are things we might be inspired about or try.
+If working within a specific project, read the relevant project code and connect the paper's lessons to the project: what applies, what might be worth trying, what inspires a different approach.
