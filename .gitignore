@@ -8,3 +8,5 @@ models-store.json
 settings.json
 /pi-goal.json
 run-history.jsonl
+/.pi/tasks
+/extensions/herdr-agent-state.ts
