@@ -402,6 +402,55 @@ export default function (pi: ExtensionAPI) {
 			);
 	}
 
+	function untrackFile(relPath: string) {
+		baselines.delete(relPath);
+		tracked.delete(relPath);
+		pi.appendEntry(ENTRY_UNTRACK, { path: relPath, timestamp: Date.now() });
+	}
+
+	async function acceptFile(ctx: ExtensionCommandContext, relPath: string) {
+		if (!baselines.has(relPath)) return false;
+		untrackFile(relPath);
+		updateUi(ctx);
+		return true;
+	}
+
+	async function declineFile(ctx: ExtensionCommandContext, relPath: string) {
+		const t = tracked.get(relPath);
+		if (!t) return false;
+		try {
+			if (t.originalContent === null) {
+				await rm(t.absPath, { force: true });
+			} else {
+				await ensureParentDir(t.absPath);
+				await writeFile(t.absPath, t.originalContent, "utf-8");
+			}
+			untrackFile(relPath);
+			updateUi(ctx);
+			return true;
+		} catch (e: any) {
+			if (ctx.hasUI) {
+				ctx.ui.notify(
+					`pi-diff: failed to revert ${t.displayPath}: ${e?.message ?? String(e)}`,
+					"error",
+				);
+			}
+			console.warn("[pi-diff] declineFile error:", e);
+			return false;
+		}
+	}
+
+	function notifyFileAction(
+		ctx: ExtensionCommandContext,
+		ok: boolean,
+		action: "accepted" | "reverted",
+		displayPath: string,
+	) {
+		if (ctx.hasUI && ok) {
+			ctx.ui.notify(`pi-diff: ${action} ${displayPath}`, "success");
+		}
+	}
+
 	function parseCommandArgs(args: string | undefined): string[] {
 		if (!args) return [];
 		return args
@@ -497,7 +546,7 @@ export default function (pi: ExtensionAPI) {
 
 						container.addChild(
 							new Text(
-								theme.fg("dim", "↑↓ navigate • enter select • esc close"),
+								theme.fg("dim", "↑↓ navigate • enter view • a accept • d decline • esc close"),
 								1,
 								0,
 							),
@@ -510,6 +559,34 @@ export default function (pi: ExtensionAPI) {
 							render: (w) => container.render(w),
 							invalidate: () => container.invalidate(),
 							handleInput: (data) => {
+								// Per-file key bindings: a = accept, d = decline
+								// vim-style nav: j = down, k = up
+								if (matchesKey(data, "j")) {
+									list.handleInput(Key.down);
+									tui.requestRender();
+									return;
+								}
+								if (matchesKey(data, "k")) {
+									list.handleInput(Key.up);
+									tui.requestRender();
+									return;
+								}
+								if (matchesKey(data, "a")) {
+									const idx = (list as any).selectedIndex ?? 0;
+									const item = selectItems[idx];
+									if (item && !item.value.startsWith("__")) {
+										done(`__accept_file__:${item.value}`);
+										return;
+									}
+								}
+								if (matchesKey(data, "d")) {
+									const idx = (list as any).selectedIndex ?? 0;
+									const item = selectItems[idx];
+									if (item && !item.value.startsWith("__")) {
+										done(`__decline_file__:${item.value}`);
+										return;
+									}
+								}
 								list.handleInput(data);
 								tui.requestRender();
 							},
@@ -527,6 +604,16 @@ export default function (pi: ExtensionAPI) {
 					await declineAll(ctx);
 					return;
 				}
+				if (picked.startsWith("__accept_file__:")) {
+					const relPath = picked.slice("__accept_file__:".length);
+					notifyFileAction(ctx, await acceptFile(ctx, relPath), "accepted", relPath);
+					continue;
+				}
+				if (picked.startsWith("__decline_file__:")) {
+					const relPath = picked.slice("__decline_file__:".length);
+					notifyFileAction(ctx, await declineFile(ctx, relPath), "reverted", relPath);
+					continue;
+				}
 
 				const t = tracked.get(picked);
 				if (!t) {
@@ -538,7 +625,7 @@ export default function (pi: ExtensionAPI) {
 				}
 
 				const md = "```diff\n" + (t.diff.trimEnd() || "(no diff)") + "\n```";
-				await ctx.ui.custom<void>(
+				const diffAction = await ctx.ui.custom<string | null>(
 					(tui, theme, _kb, done) => {
 						const container = new Container();
 						container.addChild(
@@ -549,7 +636,7 @@ export default function (pi: ExtensionAPI) {
 						);
 						container.addChild(new Markdown(md, 1, 0, getMarkdownTheme()));
 						container.addChild(
-							new Text(theme.fg("dim", "esc to go back"), 1, 0),
+							new Text(theme.fg("dim", "a — accept  •  d — decline  •  esc — go back"), 1, 0),
 						);
 						container.addChild(
 							new DynamicBorder((s: string) => theme.fg("accent", s)),
@@ -562,14 +649,29 @@ export default function (pi: ExtensionAPI) {
 								if (
 									matchesKey(data, Key.escape) ||
 									matchesKey(data, Key.ctrl("c"))
-								)
-									done();
-								else tui.requestRender();
+								) {
+									done(null);
+								} else if (matchesKey(data, "a")) {
+									done("accept");
+								} else if (matchesKey(data, "d")) {
+									done("decline");
+								} else {
+									tui.requestRender();
+								}
 							},
 						};
 					},
 					{ overlay: true },
 				);
+
+				if (diffAction === "accept") {
+					notifyFileAction(ctx, await acceptFile(ctx, picked), "accepted", t.displayPath);
+					continue;
+				}
+				if (diffAction === "decline") {
+					notifyFileAction(ctx, await declineFile(ctx, picked), "reverted", t.displayPath);
+					continue;
+				}
 
 				// After closing diff, loop back to the modification log.
 			}
@@ -589,6 +691,50 @@ export default function (pi: ExtensionAPI) {
 		handler: async (args, ctx) => {
 			(ctx as any).args = parseCommandArgs(args);
 			await declineAll(ctx);
+		},
+	});
+
+	pi.registerCommand("pi-diff-accept-file", {
+		description: "Accept changes to a specific file (keeps file, removes from log)",
+		handler: async (args, ctx) => {
+			if (!args?.trim()) {
+				if (ctx.hasUI) {
+					ctx.ui.notify("Usage: /pi-diff-accept-file <path>", "warning");
+				}
+				return;
+			}
+			await ctx.waitForIdle();
+			const { relPath } = normalizeToolPath(ctx.cwd, args.trim());
+			const ok = await acceptFile(ctx, relPath);
+			if (ctx.hasUI) {
+				if (ok) {
+					ctx.ui.notify(`pi-diff: accepted ${relPath}`, "success");
+				} else {
+					ctx.ui.notify(`pi-diff: file not tracked: ${relPath}`, "warning");
+				}
+			}
+		},
+	});
+
+	pi.registerCommand("pi-diff-decline-file", {
+		description: "Decline changes to a specific file (reverts file, removes from log)",
+		handler: async (args, ctx) => {
+			if (!args?.trim()) {
+				if (ctx.hasUI) {
+					ctx.ui.notify("Usage: /pi-diff-decline-file <path>", "warning");
+				}
+				return;
+			}
+			await ctx.waitForIdle();
+			const { relPath } = normalizeToolPath(ctx.cwd, args.trim());
+			const ok = await declineFile(ctx, relPath);
+			if (ctx.hasUI) {
+				if (ok) {
+					ctx.ui.notify(`pi-diff: reverted ${relPath}`, "success");
+				} else {
+					ctx.ui.notify(`pi-diff: file not tracked: ${relPath}`, "warning");
+				}
+			}
 		},
 	});
 
