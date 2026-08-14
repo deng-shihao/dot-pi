@@ -1,15 +1,16 @@
 import type {
 	ExtensionAPI,
 	ExtensionCommandContext,
-} from "@mariozechner/pi-coding-agent";
+	ExtensionContext,
+} from "@earendil-works/pi-coding-agent";
 import {
 	DynamicBorder,
 	getMarkdownTheme,
 	isEditToolResult,
 	isToolCallEventType,
 	isWriteToolResult,
-} from "@mariozechner/pi-coding-agent";
-import type { SelectItem } from "@mariozechner/pi-tui";
+} from "@earendil-works/pi-coding-agent";
+import type { SelectItem } from "@earendil-works/pi-tui";
 import {
 	Container,
 	Key,
@@ -17,22 +18,23 @@ import {
 	SelectList,
 	Text,
 	matchesKey,
-} from "@mariozechner/pi-tui";
-import { createTwoFilesPatch } from "diff";
+} from "@earendil-works/pi-tui";
+import { createHash } from "node:crypto";
 import { readFile, writeFile, rm, mkdir } from "node:fs/promises";
+import { createTwoFilesPatch } from "diff";
 import { dirname, relative, resolve } from "node:path";
 
 // Custom session entry types
 // New name: pi-diff
 const ENTRY_BASELINE = "pi-diff:baseline";
 const ENTRY_CLEAR = "pi-diff:clear";
+const ENTRY_UPDATE = "pi-diff:update";
 const ENTRY_UNTRACK = "pi-diff:untrack";
 
 type Baseline = {
 	path: string; // normalized path relative to ctx.cwd where possible
 	absPath: string;
 	originalContent: string | null; // null => file did not exist (created)
-	createdAt: number;
 };
 
 type TrackedFile = {
@@ -40,7 +42,8 @@ type TrackedFile = {
 	absPath: string;
 	displayPath: string;
 	originalContent: string | null;
-	currentContent: string;
+	currentContent: string | null;
+	recordedHash: string | undefined;
 	diff: string;
 	added: number;
 	removed: number;
@@ -73,9 +76,23 @@ function normalizeToolPath(
 async function readTextOrNull(absPath: string): Promise<string | null> {
 	try {
 		return await readFile(absPath, "utf-8");
-	} catch {
-		return null;
+	} catch (error) {
+		if (
+			typeof error === "object" &&
+			error !== null &&
+			"code" in error &&
+			(error as { code?: string }).code === "ENOENT"
+		) {
+			return null;
+		}
+		throw error;
 	}
+}
+
+function hashContent(content: string | null): string {
+	return content === null
+		? "missing"
+		: createHash("sha256").update(content, "utf8").digest("hex");
 }
 
 function countDiffLines(unifiedDiff: string): {
@@ -131,61 +148,24 @@ function formatStatus(
 		else edited++;
 	}
 	if (!theme) {
-		return `Δ ${edited}  + ${created}`;
+		return `◆ ${edited} changed · ✦ ${created} new`;
 	}
-	return theme.fg("muted", `Δ ${edited}  + ${created}`);
+	const changed = `${theme.fg("warning", "◆")} ${theme.bold(theme.fg("muted", `${edited}`))}${theme.fg("dim", " changed")}`;
+	const added = `${theme.fg("success", "✦")} ${theme.bold(theme.fg("muted", `${created}`))}${theme.fg("dim", " new")}`;
+	return `${changed} ${theme.fg("borderMuted", "·")} ${added}`;
 }
 
-function buildWidgetLines(
+function buildSummaryLines(
 	tracked: Map<string, TrackedFile>,
-	theme?: any,
 ): string[] | undefined {
 	if (tracked.size === 0) return undefined;
 	const items = [...tracked.values()].sort((a, b) => b.updatedAt - a.updatedAt);
 	const max = 8;
-	const lines: string[] = [];
-
-	// Separator between chat history and this widget (widget renders above the editor).
-	//const sep = "─".repeat(60);
-	//lines.push(theme ? theme.fg("borderMuted", sep) : sep);
-
-	for (const t of items.slice(0, max)) {
-		const tag = t.kind === "new" ? "+" : "Δ";
-
-		if (!theme) {
-			lines.push(
-				`${tag} ${t.displayPath} ${formatAddedRemovedPlain(t.added, t.removed)}`,
-			);
-			continue;
-		}
-
-		const prefix =
-			theme.fg("muted", `${tag} `) + theme.fg("muted", `${t.displayPath} `);
-		let counts: string;
-		const plus =
-			t.added === 0
-				? theme.fg("text", `+${t.added}`)
-				: theme.fg("success", `+${t.added}`);
-		const minus =
-			t.removed === 0
-				? theme.fg("text", `-${t.removed}`)
-				: theme.fg("error", `-${t.removed}`);
-		counts =
-			theme.fg("text", "(") +
-			plus +
-			theme.fg("text", "/") +
-			minus +
-			theme.fg("text", ")");
-
-		lines.push(prefix + counts);
-	}
-	if (items.length > max) {
-		lines.push(
-			theme
-				? theme.fg("dim", `…and ${items.length - max} more`)
-				: `…and ${items.length - max} more`,
-		);
-	}
+	const lines = items.slice(0, max).map((item) => {
+		const tag = item.kind === "new" ? "+" : "Δ";
+		return `${tag} ${item.displayPath} ${formatAddedRemovedPlain(item.added, item.removed)}`;
+	});
+	if (items.length > max) lines.push(`…and ${items.length - max} more`);
 	return lines;
 }
 
@@ -213,18 +193,20 @@ export default function (pi: ExtensionAPI) {
 	// In-memory state (reconstructed on session_start from custom entries)
 	const baselines = new Map<string, Baseline>(); // key: relPath
 	const tracked = new Map<string, TrackedFile>(); // key: relPath
+	const recordedHashes = new Map<string, string>(); // key: relPath
 
 	// Per-tool-call snapshot, only committed on successful tool_result
 	const pendingByToolCallId = new Map<string, PendingSnapshot>();
 
-	function updateUi(ctx: any) {
+	function updateUi(ctx: ExtensionContext) {
 		if (!ctx?.hasUI) return;
 
 		ctx.ui.setStatus("pi-diff", formatStatus(tracked, ctx.ui.theme));
-		ctx.ui.setWidget("pi-diff", buildWidgetLines(tracked, ctx.ui.theme));
+		// Keep the change count in the footer, but do not render a file list above the editor.
+		ctx.ui.setWidget("pi-diff", undefined);
 	}
 
-	async function recomputeTrackedFile(ctx: any, relPath: string) {
+	async function recomputeTrackedFile(relPath: string) {
 		const baseline = baselines.get(relPath);
 		if (!baseline) return;
 
@@ -244,6 +226,7 @@ export default function (pi: ExtensionAPI) {
 				displayPath,
 				originalContent: null,
 				currentContent: current,
+				recordedHash: recordedHashes.get(relPath),
 				diff,
 				added,
 				removed,
@@ -264,7 +247,8 @@ export default function (pi: ExtensionAPI) {
 				absPath: baseline.absPath,
 				displayPath,
 				originalContent: baseline.originalContent,
-				currentContent: "",
+				currentContent: null,
+				recordedHash: recordedHashes.get(relPath),
 				diff,
 				added,
 				removed,
@@ -293,6 +277,7 @@ export default function (pi: ExtensionAPI) {
 			displayPath,
 			originalContent: baseline.originalContent,
 			currentContent: current,
+			recordedHash: recordedHashes.get(relPath),
 			diff,
 			added,
 			removed,
@@ -307,12 +292,30 @@ export default function (pi: ExtensionAPI) {
 	) {
 		baselines.clear();
 		tracked.clear();
+		recordedHashes.clear();
 		pendingByToolCallId.clear();
 		pi.appendEntry(ENTRY_CLEAR, { timestamp: Date.now(), reason });
 		updateUi(ctx);
 	}
 
-	async function declineAll(ctx: ExtensionCommandContext) {
+	async function revertTrackedFile(item: TrackedFile): Promise<void> {
+		if (!item.recordedHash) {
+			throw new Error("no post-change fingerprint is stored for this legacy entry");
+		}
+		const current = await readTextOrNull(item.absPath);
+		if (hashContent(current) !== item.recordedHash) {
+			throw new Error("file changed after pi-diff recorded its latest state");
+		}
+
+		if (item.originalContent === null) {
+			await rm(item.absPath, { force: true });
+		} else {
+			await ensureParentDir(item.absPath);
+			await writeFile(item.absPath, item.originalContent, "utf-8");
+		}
+	}
+
+	async function declineAll(ctx: ExtensionCommandContext, force = false) {
 		await ctx.waitForIdle();
 
 		if (tracked.size === 0) {
@@ -320,7 +323,6 @@ export default function (pi: ExtensionAPI) {
 			return;
 		}
 
-		const force = (ctx as any).args?.includes("force") ?? false;
 		if (ctx.hasUI && !force) {
 			const ok = await ctx.ui.confirm(
 				"Decline pi changes?",
@@ -341,30 +343,29 @@ export default function (pi: ExtensionAPI) {
 
 		for (const item of items) {
 			try {
-				if (item.originalContent === null) {
-					// created file
-					await rm(item.absPath, { force: true });
-				} else {
-					await ensureParentDir(item.absPath);
-					await writeFile(item.absPath, item.originalContent, "utf-8");
-				}
+				await revertTrackedFile(item);
+				untrackFile(item.path);
 				reverted++;
-			} catch (e: any) {
-				errors.push(`${item.displayPath}: ${e?.message ?? String(e)}`);
+			} catch (error) {
+				errors.push(`${item.displayPath}: ${error instanceof Error ? error.message : String(error)}`);
 			}
 		}
 
-		await clearLog(ctx, "decline");
+		if (errors.length === 0) {
+			await clearLog(ctx, "decline");
+		} else {
+			updateUi(ctx);
+		}
 
 		if (ctx.hasUI) {
 			if (errors.length === 0) {
 				ctx.ui.notify(
 					`pi-diff: declined changes for ${reverted} file(s).`,
-					"success",
+					"info",
 				);
 			} else {
 				ctx.ui.notify(
-					`pi-diff: declined with ${errors.length} error(s). Run /pi-diff to inspect; see console for details.`,
+					`pi-diff: reverted ${reverted} file(s); ${errors.length} unsafe or failed file(s) remain tracked.`,
 					"warning",
 				);
 				console.warn("[pi-diff] decline errors:\n" + errors.join("\n"));
@@ -372,7 +373,7 @@ export default function (pi: ExtensionAPI) {
 		}
 	}
 
-	async function acceptAll(ctx: ExtensionCommandContext) {
+	async function acceptAll(ctx: ExtensionCommandContext, force = false) {
 		await ctx.waitForIdle();
 
 		if (tracked.size === 0) {
@@ -380,7 +381,6 @@ export default function (pi: ExtensionAPI) {
 			return;
 		}
 
-		const force = (ctx as any).args?.includes("force") ?? false;
 		if (ctx.hasUI && !force) {
 			const ok = await ctx.ui.confirm(
 				"Accept pi changes?",
@@ -398,13 +398,14 @@ export default function (pi: ExtensionAPI) {
 		if (ctx.hasUI)
 			ctx.ui.notify(
 				`pi-diff: accepted changes for ${count} file(s).`,
-				"success",
+				"info",
 			);
 	}
 
 	function untrackFile(relPath: string) {
 		baselines.delete(relPath);
 		tracked.delete(relPath);
+		recordedHashes.delete(relPath);
 		pi.appendEntry(ENTRY_UNTRACK, { path: relPath, timestamp: Date.now() });
 	}
 
@@ -415,28 +416,27 @@ export default function (pi: ExtensionAPI) {
 		return true;
 	}
 
-	async function declineFile(ctx: ExtensionCommandContext, relPath: string) {
+	async function declineFile(
+		ctx: ExtensionCommandContext,
+		relPath: string,
+	): Promise<"reverted" | "not-tracked" | "failed"> {
 		const t = tracked.get(relPath);
-		if (!t) return false;
+		if (!t) return "not-tracked";
 		try {
-			if (t.originalContent === null) {
-				await rm(t.absPath, { force: true });
-			} else {
-				await ensureParentDir(t.absPath);
-				await writeFile(t.absPath, t.originalContent, "utf-8");
-			}
+			await revertTrackedFile(t);
 			untrackFile(relPath);
 			updateUi(ctx);
-			return true;
-		} catch (e: any) {
+			return "reverted";
+		} catch (error) {
+			const message = error instanceof Error ? error.message : String(error);
 			if (ctx.hasUI) {
 				ctx.ui.notify(
-					`pi-diff: failed to revert ${t.displayPath}: ${e?.message ?? String(e)}`,
+					`pi-diff: failed to revert ${t.displayPath}: ${message}`,
 					"error",
 				);
 			}
-			console.warn("[pi-diff] declineFile error:", e);
-			return false;
+			if (!ctx.hasUI) console.warn("[pi-diff] declineFile error:", error);
+			return "failed";
 		}
 	}
 
@@ -447,7 +447,7 @@ export default function (pi: ExtensionAPI) {
 		displayPath: string,
 	) {
 		if (ctx.hasUI && ok) {
-			ctx.ui.notify(`pi-diff: ${action} ${displayPath}`, "success");
+			ctx.ui.notify(`pi-diff: ${action} ${displayPath}`, "info");
 		}
 	}
 
@@ -463,23 +463,19 @@ export default function (pi: ExtensionAPI) {
 	pi.registerCommand("pi-diff", {
 		description: "Show files changed by pi and inspect diffs",
 		handler: async (_args, ctx) => {
-			// Provide args to helpers (a bit hacky but keeps code compact)
-			(ctx as any).args = parseCommandArgs(_args);
-
 			await ctx.waitForIdle();
 			updateUi(ctx);
 
-			if (!ctx.hasUI) {
-				const items = [...tracked.values()].sort(
-					(a, b) => b.updatedAt - a.updatedAt,
-				);
-				if (items.length === 0) {
-					console.log("pi-diff: no pi-made modifications recorded.");
-					return;
+			if (ctx.mode !== "tui") {
+				const lines = buildSummaryLines(tracked) ?? [];
+				const summary = lines.length > 0
+					? lines.join("\n")
+					: "pi-diff: no pi-made modifications recorded.";
+				if (ctx.hasUI) {
+					ctx.ui.notify(summary, "info");
+				} else if (ctx.mode === "print") {
+					console.log(summary);
 				}
-				// Non-interactive: just print a summary to stdout
-				const lines = buildWidgetLines(tracked) ?? [];
-				console.log(lines.join("\n"));
 				return;
 			}
 
@@ -537,6 +533,10 @@ export default function (pi: ExtensionAPI) {
 							},
 						);
 
+						let selectedItem = selectItems[0];
+						list.onSelectionChange = (item) => {
+							selectedItem = item;
+						};
 						list.onSelect = (item) => {
 							if (item.value === "__sep__") return;
 							done(item.value);
@@ -572,18 +572,14 @@ export default function (pi: ExtensionAPI) {
 									return;
 								}
 								if (matchesKey(data, "a")) {
-									const idx = (list as any).selectedIndex ?? 0;
-									const item = selectItems[idx];
-									if (item && !item.value.startsWith("__")) {
-										done(`__accept_file__:${item.value}`);
+									if (selectedItem && !selectedItem.value.startsWith("__")) {
+										done(`__accept_file__:${selectedItem.value}`);
 										return;
 									}
 								}
 								if (matchesKey(data, "d")) {
-									const idx = (list as any).selectedIndex ?? 0;
-									const item = selectItems[idx];
-									if (item && !item.value.startsWith("__")) {
-										done(`__decline_file__:${item.value}`);
+									if (selectedItem && !selectedItem.value.startsWith("__")) {
+										done(`__decline_file__:${selectedItem.value}`);
 										return;
 									}
 								}
@@ -611,7 +607,8 @@ export default function (pi: ExtensionAPI) {
 				}
 				if (picked.startsWith("__decline_file__:")) {
 					const relPath = picked.slice("__decline_file__:".length);
-					notifyFileAction(ctx, await declineFile(ctx, relPath), "reverted", relPath);
+					const outcome = await declineFile(ctx, relPath);
+					notifyFileAction(ctx, outcome === "reverted", "reverted", relPath);
 					continue;
 				}
 
@@ -669,7 +666,8 @@ export default function (pi: ExtensionAPI) {
 					continue;
 				}
 				if (diffAction === "decline") {
-					notifyFileAction(ctx, await declineFile(ctx, picked), "reverted", t.displayPath);
+					const outcome = await declineFile(ctx, picked);
+					notifyFileAction(ctx, outcome === "reverted", "reverted", t.displayPath);
 					continue;
 				}
 
@@ -681,16 +679,16 @@ export default function (pi: ExtensionAPI) {
 	pi.registerCommand("pi-diff-accept", {
 		description: "Accept pi-made changes (keeps files, clears log)",
 		handler: async (args, ctx) => {
-			(ctx as any).args = parseCommandArgs(args);
-			await acceptAll(ctx);
+			const options = parseCommandArgs(args);
+			await acceptAll(ctx, options.includes("force") || options.includes("--force"));
 		},
 	});
 
 	pi.registerCommand("pi-diff-decline", {
 		description: "Decline pi-made changes (reverts files, clears log)",
 		handler: async (args, ctx) => {
-			(ctx as any).args = parseCommandArgs(args);
-			await declineAll(ctx);
+			const options = parseCommandArgs(args);
+			await declineAll(ctx, options.includes("force") || options.includes("--force"));
 		},
 	});
 
@@ -708,7 +706,7 @@ export default function (pi: ExtensionAPI) {
 			const ok = await acceptFile(ctx, relPath);
 			if (ctx.hasUI) {
 				if (ok) {
-					ctx.ui.notify(`pi-diff: accepted ${relPath}`, "success");
+					ctx.ui.notify(`pi-diff: accepted ${relPath}`, "info");
 				} else {
 					ctx.ui.notify(`pi-diff: file not tracked: ${relPath}`, "warning");
 				}
@@ -727,20 +725,21 @@ export default function (pi: ExtensionAPI) {
 			}
 			await ctx.waitForIdle();
 			const { relPath } = normalizeToolPath(ctx.cwd, args.trim());
-			const ok = await declineFile(ctx, relPath);
+			const outcome = await declineFile(ctx, relPath);
 			if (ctx.hasUI) {
-				if (ok) {
-					ctx.ui.notify(`pi-diff: reverted ${relPath}`, "success");
-				} else {
+				if (outcome === "reverted") {
+					ctx.ui.notify(`pi-diff: reverted ${relPath}`, "info");
+				} else if (outcome === "not-tracked") {
 					ctx.ui.notify(`pi-diff: file not tracked: ${relPath}`, "warning");
 				}
 			}
 		},
 	});
 
-	async function rebuildFromSession(ctx: any): Promise<void> {
+	async function rebuildFromSession(ctx: ExtensionContext): Promise<void> {
 		baselines.clear();
 		tracked.clear();
+		recordedHashes.clear();
 		pendingByToolCallId.clear();
 
 		// Replay custom entries on current branch
@@ -750,38 +749,48 @@ export default function (pi: ExtensionAPI) {
 			if (entry.customType === ENTRY_CLEAR) {
 				baselines.clear();
 				tracked.clear();
+				recordedHashes.clear();
 				continue;
 			}
 
 			if (entry.customType === ENTRY_BASELINE) {
-				const data = entry.data as any;
-				if (!data?.path) continue;
+				const data = entry.data as { path?: unknown; originalContent?: unknown };
+				if (
+					typeof data?.path !== "string" ||
+					(data.originalContent !== null && typeof data.originalContent !== "string")
+				) {
+					continue;
+				}
 				const { absPath, relPath } = normalizeToolPath(ctx.cwd, data.path);
 				baselines.set(relPath, {
 					path: relPath,
 					absPath,
-					originalContent:
-						typeof data.originalContent === "string"
-							? data.originalContent
-							: null,
-					createdAt:
-						typeof data.timestamp === "number" ? data.timestamp : Date.now(),
+					originalContent: data.originalContent,
 				});
 				continue;
 			}
 
+			if (entry.customType === ENTRY_UPDATE) {
+				const data = entry.data as { path?: unknown; contentHash?: unknown };
+				if (typeof data?.path !== "string" || typeof data.contentHash !== "string") continue;
+				const { relPath } = normalizeToolPath(ctx.cwd, data.path);
+				recordedHashes.set(relPath, data.contentHash);
+				continue;
+			}
+
 			if (entry.customType === ENTRY_UNTRACK) {
-				const data = entry.data as any;
-				if (!data?.path) continue;
+				const data = entry.data as { path?: unknown };
+				if (typeof data?.path !== "string") continue;
 				const { relPath } = normalizeToolPath(ctx.cwd, data.path);
 				baselines.delete(relPath);
 				tracked.delete(relPath);
+				recordedHashes.delete(relPath);
 			}
 		}
 
 		// Compute current diffs
 		for (const relPath of baselines.keys()) {
-			await recomputeTrackedFile(ctx, relPath);
+			await recomputeTrackedFile(relPath);
 		}
 
 		updateUi(ctx);
@@ -792,17 +801,16 @@ export default function (pi: ExtensionAPI) {
 		await rebuildFromSession(ctx);
 	});
 
-	pi.on("session_switch", async (_event, ctx) => {
-		await rebuildFromSession(ctx);
+	pi.on("session_shutdown", (_event, ctx) => {
+		if (!ctx.hasUI) return;
+		ctx.ui.setStatus("pi-diff", undefined);
+		ctx.ui.setWidget("pi-diff", undefined);
 	});
 
 	pi.on("session_tree", async (_event, ctx) => {
 		await rebuildFromSession(ctx);
 	});
 
-	pi.on("session_fork", async (_event, ctx) => {
-		await rebuildFromSession(ctx);
-	});
 
 	// Capture before snapshots for edit/write
 	pi.on("tool_call", async (event, ctx) => {
@@ -839,7 +847,6 @@ export default function (pi: ExtensionAPI) {
 				path: pending.path,
 				absPath: pending.absPath,
 				originalContent: pending.before,
-				createdAt: Date.now(),
 			});
 			pi.appendEntry(ENTRY_BASELINE, {
 				path: pending.path,
@@ -848,26 +855,23 @@ export default function (pi: ExtensionAPI) {
 			});
 		}
 
-		// Recompute cumulative diff against baseline
-		await recomputeTrackedFile(ctx, pending.path);
-
-		// If file is back to baseline, untrack + persist
-		const baseline = baselines.get(pending.path);
+		const baseline = baselines.get(pending.path)!;
 		const current = await readTextOrNull(pending.absPath);
-		if (baseline) {
-			const backToOriginal =
-				(baseline.originalContent !== null &&
-					current === baseline.originalContent) ||
-				(baseline.originalContent === null && current === null);
+		const backToOriginal =
+			(baseline.originalContent !== null && current === baseline.originalContent) ||
+			(baseline.originalContent === null && current === null);
 
-			if (backToOriginal) {
-				baselines.delete(pending.path);
-				tracked.delete(pending.path);
-				pi.appendEntry(ENTRY_UNTRACK, {
-					path: pending.path,
-					timestamp: Date.now(),
-				});
-			}
+		if (backToOriginal) {
+			untrackFile(pending.path);
+		} else {
+			const contentHash = hashContent(current);
+			recordedHashes.set(pending.path, contentHash);
+			pi.appendEntry(ENTRY_UPDATE, {
+				path: pending.path,
+				contentHash,
+				timestamp: Date.now(),
+			});
+			await recomputeTrackedFile(pending.path);
 		}
 
 		updateUi(ctx);

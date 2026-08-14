@@ -39,7 +39,8 @@ function str(value: unknown): string | null {
 function shortenPath(raw: unknown): string {
   if (typeof raw !== "string") return "";
   const home = homedir();
-  if (raw.startsWith(home)) return `~${raw.slice(home.length)}`;
+  if (raw === home) return "~";
+  if (raw.startsWith(`${home}/`)) return `~${raw.slice(home.length)}`;
   return raw;
 }
 
@@ -199,15 +200,14 @@ export default function (pi: ExtensionAPI) {
 
   pi.on("session_start", async (_event, _ctx) => {
     const active = pi.getActiveTools();
-    // Remove built-in find and grep; keep fd and rg as the only
-    // file-discovery and text-search tools.
     const replaced = active.filter(
       (name) => name !== "find" && name !== "grep",
     );
-    // Ensure fd and rg are active (they should already be registered at
-    // extension load time).
-    if (!replaced.includes("fd")) replaced.push("fd");
-    if (!replaced.includes("rg")) replaced.push("rg");
+
+    // Replace only search tools that were active. Do not enable fd/rg in
+    // sessions that deliberately started without discovery or search tools.
+    if (active.includes("find") && !replaced.includes("fd")) replaced.push("fd");
+    if (active.includes("grep") && !replaced.includes("rg")) replaced.push("rg");
     pi.setActiveTools(replaced);
   });
 

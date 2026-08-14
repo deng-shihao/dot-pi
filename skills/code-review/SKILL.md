@@ -1,87 +1,192 @@
 ---
 name: code-review
-description: Review the changes since a fixed point (commit, branch, tag, or merge-base) along two axes — Standards (does the code follow this repo's documented coding standards?) and Spec (does the code match what the originating issue/PRD asked for?). Runs both reviews in parallel sub-agents and reports them side by side. Use when the user wants to review a branch, a PR, work-in-progress changes, or asks to "review since X".
+description: Run an extremely strict maintainability review for abstraction quality, giant files, and spaghetti-condition growth. Use for a deep code quality audit or an especially harsh maintainability review.
+disable-model-invocation: true
 ---
 
-Two-axis review of the diff between `HEAD` and a fixed point the user supplies:
+# Strict Code Quality Review
 
-- **Standards** — does the code conform to this repo's documented coding standards?
-- **Spec** — does the code faithfully implement the originating issue / PRD / spec?
+Use this skill for an unusually strict review focused on implementation quality, maintainability, abstraction quality, and codebase health.
 
-Both axes run as **parallel sub-agents** so they don't pollute each other's context, then this skill aggregates their findings.
+Above all, this skill should push the reviewer to be **ambitious** about code structure. Do not merely identify local cleanup opportunities. Actively search for "code judo" moves: restructurings that preserve behavior while making the implementation dramatically simpler, smaller, more direct, and more elegant.
 
-## Process
+## Core Prompt
 
-### 1. Pin the fixed point
+Start from this baseline:
 
-Whatever the user said is the fixed point — a commit SHA, branch name, tag, `main`, `HEAD~5`, etc. If they didn't specify one, ask for it.
+> Perform a deep code quality audit of the current branch's changes.
+> Rethink how to structure / implement the changes to meaningfully improve code quality without impacting behavior.
+> Work to improve abstractions, modularity, reduce Spaghetti code, improve succinctness and legibility.
+> Be ambitious, if there is a clear path to improving the implementation that involves restructuring some of the codebase, go for it.
+> Be extremely thorough and rigorous. Measure twice, cut once.
 
-Capture the diff command once: `git diff <fixed-point>...HEAD` (three-dot, so the comparison is against the merge-base). Also note the list of commits via `git log <fixed-point>..HEAD --oneline`.
+## Non-Negotiable Additional Standards
 
-Before going further, confirm the fixed point resolves (`git rev-parse <fixed-point>`) and the diff is non-empty. A bad ref or empty diff should fail here — not inside two parallel sub-agents.
+Apply the baseline prompt above, plus these explicit review rules:
 
-### 2. Identify the spec source
+0. **Be ambitious about structural simplification.**
+   - Do not stop at "this could be a bit cleaner."
+   - Look for opportunities to reframe the change so that whole branches, helpers, modes, conditionals, or layers disappear entirely.
+   - Prefer the solution that makes the code feel inevitable in hindsight.
+   - Assume there is often a "code judo" move available: a re-organization that uses the existing architecture more effectively and makes the change dramatically simpler and more elegant.
+   - If you see a path to delete complexity rather than rearrange it, push hard for that path.
 
-Look for the originating spec, in this order:
+1. **Do not let a PR push a file from under 1k lines to over 1k lines without a very strong reason.**
+   - Treat this as a strong code-quality smell by default.
+   - Prefer extracting helpers, subcomponents, modules, or local abstractions instead of letting a file sprawl past 1000 lines.
+   - If the diff crosses that threshold, explicitly ask whether the code should be decomposed first.
+   - Only waive this if there is a compelling structural reason and the resulting file is still clearly organized.
 
-1. Issue references in the commit messages (`#123`, `Closes #45`, GitLab `!67`, etc.) — fetch via the workflow in `docs/agents/issue-tracker.md`.
-2. A path the user passed as an argument.
-3. A PRD/spec file under `docs/`, `specs/`, or `.scratch/` matching the branch name or feature.
-4. If nothing is found, ask the user where the spec is. If they say there isn't one, the **Spec** sub-agent will skip and report "no spec available".
+2. **Do not allow random spaghetti growth in existing code.**
+   - Be highly suspicious of new ad-hoc conditionals, scattered special cases, or one-off branches inserted into unrelated flows.
+   - If a change adds "weird if statements in random places", treat that as a design problem, not a stylistic nit.
+   - Prefer pushing the logic into a dedicated abstraction, helper, state machine, policy object, or separate module instead of tangling an existing path.
+   - Call out changes that make the surrounding code harder to reason about, even if they technically work.
 
-### 3. Identify the standards sources
+3. **Bias toward cleaning the design, not just accepting working code.**
+   - If behavior can stay the same while the structure becomes meaningfully cleaner, push for the cleaner version.
+   - Do not rubber-stamp "it works" implementations that leave the codebase messier.
+   - Strongly prefer simplifications that remove moving pieces altogether over refactors that merely spread the same complexity around.
 
-Anything in the repo that documents how code should be written, such as `CODING_STANDARDS.md` or `CONTRIBUTING.md`.
+4. **Prefer direct, boring, maintainable code over hacky or magical code.**
+   - Treat brittle, ad-hoc, or "magic" behavior as a code-quality problem.
+   - Be skeptical of generic mechanisms that hide simple data-shape assumptions.
+   - Flag thin abstractions, identity wrappers, or pass-through helpers that add indirection without buying clarity.
 
-On top of whatever the repo documents, the Standards axis always carries the **smell baseline** below — a fixed set of Fowler code smells (_Refactoring_, ch.3) that applies even when a repo documents nothing. Two rules bind it:
+5. **Push hard on type and boundary cleanliness when they affect maintainability.**
+   - Question unnecessary optionality, `unknown`, `any`, or cast-heavy code when a clearer type boundary could exist.
+   - Prefer explicit typed models or shared contracts over loosely-shaped ad-hoc objects.
+   - If a branch relies on silent fallback to paper over an unclear invariant, ask whether the boundary should be made explicit instead.
 
-- **The repo overrides.** A documented repo standard always wins; where it endorses something the baseline would flag, suppress the smell.
-- **Always a judgement call.** Each smell is a labelled heuristic ("possible Feature Envy"), never a hard violation — and, like any standard here, skip anything tooling already enforces.
+6. **Keep logic in the canonical layer and reuse existing helpers.**
+   - Call out feature logic leaking into shared paths or implementation details leaking through APIs.
+   - Prefer existing canonical utilities/helpers over bespoke one-offs.
+   - Push code toward the right package, service, or module instead of normalizing architectural drift.
 
-Each smell reads *what it is* → *how to fix*; match it against the diff:
+7. **Treat unnecessary sequential orchestration and non-atomic updates as design smells when the cleaner structure is obvious.**
+   - If independent work is serialized for no good reason, ask whether the flow should run in parallel instead.
+   - If related updates can leave state half-applied, push for a more atomic structure.
+   - Do not over-index on micro-optimizations, but do flag avoidable orchestration complexity that makes the implementation more brittle.
 
-- **Mysterious Name** — a function, variable, or type whose name doesn't reveal what it does or holds. → rename it; if no honest name comes, the design's murky.
-- **Duplicated Code** — the same logic shape appears in more than one hunk or file in the change. → extract the shared shape, call it from both.
-- **Feature Envy** — a method that reaches into another object's data more than its own. → move the method onto the data it envies.
-- **Data Clumps** — the same few fields or params keep travelling together (a type wanting to be born). → bundle them into one type, pass that.
-- **Primitive Obsession** — a primitive or string standing in for a domain concept that deserves its own type. → give the concept its own small type.
-- **Repeated Switches** — the same `switch`/`if`-cascade on the same type recurs across the change. → replace with polymorphism, or one map both sites share.
-- **Shotgun Surgery** — one logical change forces scattered edits across many files in the diff. → gather what changes together into one module.
-- **Divergent Change** — one file or module is edited for several unrelated reasons. → split so each module changes for one reason.
-- **Speculative Generality** — abstraction, parameters, or hooks added for needs the spec doesn't have. → delete it; inline back until a real need shows.
-- **Message Chains** — long `a.b().c().d()` navigation the caller shouldn't depend on. → hide the walk behind one method on the first object.
-- **Middle Man** — a class or function that mostly just delegates onward. → cut it, call the real target direct.
-- **Refused Bequest** — a subclass or implementer that ignores or overrides most of what it inherits. → drop the inheritance, use composition.
+## Primary Review Questions
 
-### 4. Spawn both sub-agents in parallel
+For every meaningful change, ask:
 
-Send a single message with two `Agent` tool calls. Use the `general-purpose` subagent for both.
+- Is there a "code judo" move that would make this dramatically simpler?
+- Can this change be reframed so fewer concepts, branches, or helper layers are needed?
+- Does this improve or worsen the local architecture?
+- Did the diff add branching complexity where a better abstraction should exist?
+- Did a previously cohesive module become more coupled, more stateful, or harder to scan?
+- Is this logic living in the right file and layer?
+- Did this change enlarge a file or component past a healthy size boundary?
+- Are there repeated conditionals that signal a missing model or missing helper?
+- Is the implementation direct and legible, or does it rely on special cases and incidental control flow?
+- Is this abstraction actually earning its keep, or is it just a wrapper?
+- Did the diff introduce casts, optionality, or ad-hoc object shapes that obscure the real invariant?
+- Is this logic living in the canonical layer, or did the diff leak details across a boundary?
+- Is this orchestration more sequential or less atomic than it needs to be?
 
-**Standards sub-agent prompt** — include:
+## What to Flag Aggressively
 
-- The full diff command and commit list.
-- The list of standards-source files you found in step 3, **plus the smell baseline from step 3** pasted in full — the sub-agent has no other access to it.
-- The brief: "Report — per file/hunk where relevant — (a) every place the diff violates a documented standard: cite the standard (file + the rule); and (b) any baseline smell you spot: name it and quote the hunk. Distinguish hard violations from judgement calls — documented-standard breaches can be hard, but baseline smells are always judgement calls, and a documented repo standard overrides the baseline. Skip anything tooling enforces. Under 400 words."
+Escalate findings when you see:
 
-**Spec sub-agent prompt** — include:
+- A complicated implementation where a cleaner reframing could delete whole categories of complexity.
+- Refactors that move code around but fail to reduce the number of concepts a reader must hold in their head.
+- A file crossing 1000 lines due to the PR, especially if the new code could be split out.
+- New conditionals bolted onto unrelated code paths.
+- One-off booleans, nullable modes, or flags that complicate existing control flow.
+- Feature-specific logic leaking into general-purpose modules.
+- Generic "magic" handling that hides simple structure and makes the code harder to reason about.
+- Thin wrappers or identity abstractions that add indirection without simplifying anything.
+- Unnecessary casts, `any`, `unknown`, or optional params that muddy the real contract.
+- Copy-pasted logic instead of extracted helpers.
+- Narrow edge-case handling implemented in the middle of an already busy function.
+- Refactors that technically pass tests but make the code less modular or less readable.
+- "Temporary" branching that is likely to become permanent debt.
+- Bespoke helpers where the codebase already has a canonical utility for the job.
+- Logic added in the wrong layer/package when it should live somewhere more central.
+- Sequential async flow where obviously independent work could stay simpler and clearer with parallel execution.
+- Partial-update logic that leaves state less atomic than necessary.
 
-- The diff command and commit list.
-- The path or fetched contents of the spec.
-- The brief: "Report: (a) requirements the spec asked for that are missing or partial; (b) behaviour in the diff that wasn't asked for (scope creep); (c) requirements that look implemented but where the implementation looks wrong. Quote the spec line for each finding. Under 400 words."
+## Preferred Remedies
 
-If the spec is missing, skip the Spec sub-agent and note this in the final report.
+When you identify a code-quality problem, prefer suggestions like:
 
-### 5. Aggregate
+- Delete a whole layer of indirection rather than polishing it.
+- Reframe the state model so conditionals disappear instead of getting centralized.
+- Change the ownership boundary so the feature becomes a natural extension of an existing abstraction.
+- Turn special-case logic into a simpler default flow with fewer exceptions.
+- Extract a helper or pure function.
+- Split a large file into smaller focused modules.
+- Move feature-specific logic behind a dedicated abstraction.
+- Replace condition chains with a typed model or explicit dispatcher.
+- Separate orchestration from business logic.
+- Collapse duplicate branches into a single clearer flow.
+- Delete wrappers that do not meaningfully clarify the API.
+- Reuse the existing canonical helper instead of introducing a near-duplicate.
+- Make type boundaries more explicit so the control flow gets simpler.
+- Move the logic to the package/module/layer that already owns the concept.
+- Parallelize independent work when that also simplifies the orchestration.
+- Restructure related updates into a more atomic flow when partial state would be harder to reason about.
 
-Present the two reports under `## Standards` and `## Spec` headings, verbatim or lightly cleaned. Do **not** merge or rerank findings — the two axes are deliberately separate (see _Why two axes_).
+Do not be satisfied with "maybe rename this" feedback when the real issue is structural.
+Do not be satisfied with a merely cleaner version of the same messy idea if there is a plausible path to a much simpler idea.
 
-End with a one-line summary: total findings per axis, and the worst issue _within each axis_ (if any). Don't pick a single winner across axes — that's the reranking the separation exists to prevent.
+## Review Tone
 
-## Why two axes
+Be direct, serious, and demanding about quality.
+Do not be rude, but do not soften major maintainability issues into mild suggestions.
+If the code is making the codebase messier, say so clearly.
+If the implementation missed an opportunity for a dramatic simplification, say that clearly too.
 
-A change can pass one axis and fail the other:
+Good phrases:
 
-- Code that follows every standard but implements the wrong thing → **Standards pass, Spec fail.**
-- Code that does exactly what the issue asked but breaks the project's conventions → **Spec pass, Standards fail.**
+- `this pushes the file past 1k lines. can we decompose this first?`
+- `this adds another special-case branch into an already busy flow. can we move this behind its own abstraction?`
+- `this works, but it makes the surrounding code more spaghetti. let's keep the behavior and restructure the implementation.`
+- `this feels like feature logic leaking into a shared path. can we isolate it?`
+- `this abstraction seems unnecessary. can we just keep the direct flow?`
+- `why does this need a cast / optional here? can we make the boundary more explicit instead?`
+- `this looks like a bespoke helper for something we already have elsewhere. can we reuse the canonical one?`
+- `i think there's a code-judo move here that makes this much simpler. can we reframe this so these branches disappear?`
+- `this refactor moves complexity around, but doesn't really delete it. is there a way to make the model itself simpler?`
 
-Reporting them separately stops one axis from masking the other.
+## Output Expectations
+
+Prioritize findings in this order:
+
+1. Structural code-quality regressions
+2. Missed opportunities for dramatic simplification / code-judo restructuring
+3. Spaghetti / branching complexity increases
+4. Boundary / abstraction / type-contract problems that make the code harder to reason about
+5. File-size and decomposition concerns
+6. Modularity and abstraction issues
+7. Legibility and maintainability concerns
+
+Do not flood the review with low-value nits if there are larger structural issues.
+Prefer a smaller number of high-conviction comments over a long list of cosmetic notes.
+
+## Approval Bar
+
+Do not approve merely because behavior seems correct.
+The bar for approval is:
+
+- no clear structural regression
+- no obvious missed opportunity to make the implementation dramatically simpler when such a path is visible
+- no unjustified file-size explosion
+- no obvious spaghetti-growth from special-case branching
+- no obviously hacky or magical abstraction that makes the code harder to reason about
+- no unnecessary wrapper/cast/optionality churn obscuring the real design
+- no clear architecture-boundary leak or avoidable canonical-helper duplication
+- no missed opportunity for an obvious decomposition that would materially improve maintainability
+
+Treat these as presumptive blockers unless the author can justify them clearly:
+
+- the PR preserves a lot of incidental complexity when there is a plausible code-judo move that would delete it
+- the PR pushes a file from below 1000 lines to above 1000 lines
+- the PR adds ad-hoc branching that makes an existing flow more tangled
+- the PR solves a local problem by scattering feature checks across shared code
+- the PR adds an unnecessary abstraction, wrapper, or cast-heavy contract that makes the design more indirect
+- the PR duplicates an existing helper or puts logic in the wrong layer when there is a clear canonical home
+
+If those conditions are not met, leave explicit, actionable feedback and push for a cleaner decomposition.

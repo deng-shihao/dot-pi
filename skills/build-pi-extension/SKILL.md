@@ -7,6 +7,16 @@ description: Build a pi extension — a TypeScript module that extends pi with c
 
 A pi extension is a TypeScript module that exports a default factory receiving `ExtensionAPI`. The factory can be sync or async.
 
+## Extension Styles
+
+```bash
+~/.pi/agent/extensions/
+└── my-extension/
+    ├── index.ts        # Entry point (exports default function)
+    ├── tools.ts        # Helper module
+    └── utils.ts        # Helper module
+```
+
 ## Steps
 
 ### 1. Pin down what the extension must do

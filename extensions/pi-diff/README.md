@@ -5,7 +5,7 @@ Tracks files changed (modified/created) by **pi** via the built-in `edit` and `w
 ## Features
 
 - Persistent log (stored in session as custom entries)
-- Status line + widget listing changed files
+- Status line showing the number of changed files
 - `/pi-diff` overlay to inspect diffs with per-file accept/decline
 - `/pi-diff-accept` to clear the log (keep all files)
 - `/pi-diff-decline` to revert all logged changes (restore original contents / delete created files)
@@ -35,3 +35,4 @@ If `ctx.hasUI` is false (print/json mode), accept/decline require explicit confi
 
 - Only tracks changes performed through `edit` and `write` tools.
 - To support "decline", the extension stores the original file contents (before the first pi change) in the session file as a custom entry.
+- Revert fingerprints each recorded post-change state and refuses to overwrite a file that changed afterward; failed files remain tracked for inspection or retry.
