@@ -1,7 +1,9 @@
 ---
 name: kill-ai-slop
 description: >
-  Remove AI slop from web projects: generic visual and copy patterns that make landing pages, UIs, or docs feel templated or AI-generated. Detects and fixes overused gradients, cozy palettes, semantic color defaults, serif-italic emphasis, decorative highlights, AI-style copy, emoji and badge spam, glowing dots, rounded callouts, pastel icon tiles, glassmorphism, excessive rounding and shadows, inconsistent corners, low-quality SVG icons, all-caps card grids, and tasteful terminal styling. Supports HTML/CSS, React, Vue, Svelte, Astro, Tailwind, and Markdown.
+  Remove AI slop from web projects — templated visual and copy patterns that make
+  landing pages, UIs, and docs feel generic. Covers HTML/CSS, React, Vue, Svelte,
+  Astro, Tailwind, and Markdown.
 disable-model-invocation: true
 ---
 

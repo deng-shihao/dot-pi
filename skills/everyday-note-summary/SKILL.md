@@ -29,6 +29,8 @@ Topics:
 
 ## Workflow
 
+Run only the steps the request asks for; default to summary + rename.
+
 ### 1. Read and Summarize
 Read the full note. Write a structured summary block (see Summary Block above) and insert at file start.
 

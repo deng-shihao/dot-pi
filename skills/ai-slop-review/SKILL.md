@@ -1,7 +1,7 @@
 ---
 name: ai-slop-review
 description: >
-  Scan code for common AI-generated anti-patterns: defensive programming, band-aid patches, dead code, consistency violations, fragile patterns, and forced consolidation. Use when the user asks to review a file, directory, or git diff for AI slop.
+  Scan code for AI-generated anti-patterns — defensive programming, band-aid patches, dead code, fragile patterns, forced consolidation. Use when a file, directory, or diff needs a code-level slop review.
 ---
 
 # AI Slop Review Engine

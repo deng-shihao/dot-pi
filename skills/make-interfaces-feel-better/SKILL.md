@@ -1,6 +1,6 @@
 ---
 name: make-interfaces-feel-better
-description: Design engineering principles for making interfaces feel polished. Use when building UI components, reviewing frontend code, implementing animations, hover states, shadows, borders, typography, micro-interactions, enter/exit animations, or any visual detail work. Triggers on UI polish, design details, "make it feel better", "feels off", stagger animations, border radius, optical alignment, font smoothing, tabular numbers, image outlines, box shadows.
+description: Design details that make an interface feel polished — concentric border radius, shadows over borders, optical alignment, image outlines, tabular numbers, hit areas, stagger and exit animations. Use for a polish pass or review of existing UI ("make it feel better", "feels off"). frontend-skill owns new-page composition.
 ---
 
 # Details that make interfaces feel better
@@ -99,7 +99,7 @@ Interactive elements need at least 40×40px hit area. Extend with a pseudo-eleme
 
 ## Review Output Format
 
-Always present changes as a markdown table with **Before** and **After** columns. Include every change you made — not just a subset. Never list findings as separate "Before:" / "After:" lines outside of a table. Group changes by principle using a heading above each table, and keep each row focused on a single diff so the reader can scan the whole list quickly.
+When the user asks for a review or summary of changes, present them as a markdown table with **Before** and **After** columns. Include every change you made — not just a subset. Never list findings as separate "Before:" / "After:" lines outside of a table. Group changes by principle using a heading above each table, and keep each row focused on a single diff so the reader can scan the whole list quickly.
 
 ### Example
 

@@ -1,6 +1,6 @@
 ---
 name: frontend-skill
-description: Use when the task asks for a visually strong landing page, website, app, prototype, demo, or game UI. This skill enforces restrained composition, image-led hierarchy, cohesive content structure, and tasteful motion while avoiding generic cards, weak branding, and UI clutter.
+description: Compose visually strong landing pages, sites, app shells, prototypes, demos, and game UI — art direction, hierarchy, imagery, copy, motion. Use for new page or screen composition. make-interfaces-feel-better owns polish passes on existing UI.
 ---
 
 # Frontend Skill
