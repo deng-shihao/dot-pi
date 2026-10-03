@@ -328,11 +328,14 @@ async function captureGitTree(
   const indexFile = join(tempDir, "index");
 
   try {
-    await runGit(root, ["read-tree", "--empty"], {
-      indexFile,
-      storage,
-      signal,
-    });
+    // Seed tracked paths without stat caches or skip flags. This includes
+    // tracked ignored files and forces Git to read their actual contents.
+    const trackedEntries = await runGit(root, ["ls-files", "--stage", "-z"], { storage, signal });
+    await runGit(root, ["read-tree", "--empty"], { indexFile, storage, signal });
+    if (trackedEntries.length > 0) {
+      await runGit(root, ["update-index", "-z", "--index-info"],
+        { indexFile, storage, signal, input: trackedEntries });
+    }
     await runGit(root, ["add", "-A", "--", "."], {
       indexFile,
       storage,

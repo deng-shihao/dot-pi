@@ -9,10 +9,11 @@ import {
 	type Theme,
 } from "@earendil-works/pi-coding-agent";
 import type { EditorTheme, TUI } from "@earendil-works/pi-tui";
-import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
+import { mixColors, parseColor, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 
 const ANSI_SGR_PATTERN = /\x1b\[[0-9;]*m/g;
 const CONTROL_CHARACTER_PATTERN = /[\u0000-\u001f\u007f-\u009f]/g;
+const CONTEXT_COLOR = parseColor("#56949f");
 
 function plainText(text: string): string {
 	return text.replace(ANSI_SGR_PATTERN, "");
@@ -130,11 +131,14 @@ type EditorFactory = ReturnType<ExtensionContext["ui"]["getEditorComponent"]>;
 
 export default function piStatusline(pi: ExtensionAPI) {
 	let previousEditor: EditorFactory;
+	let editorInstalled = false;
 
 	pi.on("session_start", (_event, ctx) => {
 		if (ctx.mode !== "tui") return;
+		const statusTheme = ctx.ui.getTheme("rose-pine-dawn") ?? ctx.ui.theme;
 
-		ctx.ui.setFooter((tui, theme, footerData) => {
+		ctx.ui.setFooter((tui, _theme, footerData) => {
+			const theme = statusTheme;
 			let usageCached = false;
 			let cachedLeafId: string | null = null;
 			let cachedTotals: UsageTotals = {
@@ -145,6 +149,24 @@ export default function piStatusline(pi: ExtensionAPI) {
 				cost: 0,
 			};
 			let cachedCacheHitRate: number | undefined;
+			let responseStartedAt: number | undefined;
+			let tokensPerSecond: number | undefined;
+
+			const unsubscribeStart = pi.on("message_start", (event) => {
+				if (event.message.role !== "assistant") return;
+				responseStartedAt =
+					event.message.stopReason === "pending" ? performance.now() : undefined;
+			});
+			const unsubscribeEnd = pi.on("message_end", (event) => {
+				if (event.message.role !== "assistant") return;
+				const elapsed = responseStartedAt === undefined ? 0 : performance.now() - responseStartedAt;
+				tokensPerSecond =
+					elapsed > 0 && event.message.usage.output > 0
+						? (event.message.usage.output * 1_000) / elapsed
+						: undefined;
+				responseStartedAt = undefined;
+				tui.requestRender();
+			});
 
 			const refreshUsage = () => {
 				const leafId = ctx.sessionManager.getLeafId();
@@ -172,7 +194,7 @@ export default function piStatusline(pi: ExtensionAPI) {
 					) {
 						addUsage(totals, entry.message.usage);
 					} else if (
-						(entry.type === "branch_summary" || entry.type === "compaction") &&
+						(entry.type === "branch_summary" || entry.type === "compaction" || entry.type === "usage") &&
 						entry.usage
 					) {
 						addUsage(totals, entry.usage);
@@ -191,7 +213,11 @@ export default function piStatusline(pi: ExtensionAPI) {
 			});
 
 			return {
-				dispose: unsubscribe,
+				dispose() {
+					unsubscribe();
+					unsubscribeStart();
+					unsubscribeEnd();
+				},
 				invalidate() {},
 				render(width: number): string[] {
 					refreshUsage();
@@ -216,6 +242,11 @@ export default function piStatusline(pi: ExtensionAPI) {
 					}
 					if (traffic.length > 0) detailedGroups.push(traffic.join(" "));
 					if (compactTraffic.length > 0) compactGroups.push(compactTraffic.join(" "));
+					if (tokensPerSecond !== undefined) {
+						const speed = `${theme.fg("success", theme.bold(tokensPerSecond.toFixed(1)))}${theme.fg("dim", " tok/s")}`;
+						detailedGroups.push(speed);
+						compactGroups.push(speed);
+					}
 
 					const cache: string[] = [];
 					const compactCache: string[] = [];
@@ -267,18 +298,29 @@ export default function piStatusline(pi: ExtensionAPI) {
 						usage?.contextWindow ?? ctx.model?.contextWindow ?? 0,
 					);
 					const percent = usage?.percent;
-					const percentText = percent === null || percent === undefined ? "?" : `${percent.toFixed(1)}%`;
-					const coloredPercent =
-						percent !== null && percent !== undefined && percent > 90
-							? theme.fg("error", theme.bold(percentText))
-							: percent !== null && percent !== undefined && percent > 70
-								? theme.fg("warning", theme.bold(percentText))
-								: theme.fg("accent", theme.bold(percentText));
-					detailedGroups.push(
-						`${theme.fg("dim", "ctx ")}${coloredPercent}${theme.fg("dim", ` / ${contextWindow} · auto`)}`,
-					);
-					compactGroups.push(
-						`${coloredPercent}${theme.fg("dim", `/${contextWindow} auto`)}`,
+					const color = (percent ?? 0) > 90 ? "error" : (percent ?? 0) > 70 ? "warning" : CONTEXT_COLOR;
+					const contextLabel = theme.fg("dim", "ctx ");
+					const contextDetails =
+						theme.style(` ${percent == null ? "?" : `${percent.toFixed(1)}%`}`, {
+							fg: percent == null ? "dim" : color,
+						}) + theme.fg("dim", ` / ${contextWindow} · auto`);
+					const barWidth = Math.max(0, width - visibleWidth(contextLabel) - visibleWidth(contextDetails));
+					const filled = Math.round(Math.max(0, Math.min(100, percent ?? 0)) / 100 * barWidth);
+					const baseColor = typeof color === "string" ? theme.colors[color] : color;
+					// Shade the filled cells while keeping the original usage color at the tip.
+					const contextBar = Array.from({ length: filled }, (_, index) =>
+						theme.style("█", {
+							fg: mixColors(baseColor, theme.colors.text,
+								0.35 * (filled - 1 - index) / Math.max(1, filled - 1), "srgb"),
+						}),
+					).join("");
+					const contextLine = truncateToWidth(
+						contextLabel +
+							contextBar +
+							theme.fg("dim", "░".repeat(barWidth - filled)) +
+							contextDetails,
+						width,
+						theme.fg("dim", "…"),
 					);
 
 					const allStatuses = [...footerData.getExtensionStatuses().entries()].sort(
@@ -287,12 +329,13 @@ export default function piStatusline(pi: ExtensionAPI) {
 					const diffStatus = allStatuses.find(([id]) => id === "pi-diff")?.[1];
 					const detailedStats = joinMetricGroups(theme, detailedGroups);
 					const metricLines =
-						visibleWidth(detailedStats) <= width
+						detailedStats && visibleWidth(detailedStats) <= width
 							? [detailedStats]
 							: wrapMetricGroups(theme, compactGroups, width);
 					const lines = [
 						renderLocation(theme, ctx.cwd, branch, sessionName, diffStatus, width),
 						...metricLines,
+						contextLine,
 					];
 					const statuses = allStatuses
 						.filter(([id]) => id !== "pi-diff")
@@ -312,6 +355,11 @@ export default function piStatusline(pi: ExtensionAPI) {
 			}
 
 			render(width: number): string[] {
+				const theme = statusTheme;
+				const thinking = pi.getThinkingLevel();
+				this.borderColor = this.getText().trimStart().startsWith("!")
+					? theme.getBashModeBorderColor()
+					: theme.getThinkingBorderColor(thinking);
 				if (width < 8) return super.render(width);
 
 				const promptWidth = 3;
@@ -320,10 +368,8 @@ export default function piStatusline(pi: ExtensionAPI) {
 				const bottomIndex = lines.findLastIndex((line, index) => index > 0 && isHorizontalBorder(line));
 				if (bottomIndex < 1) return lines.map((line) => truncateToWidth(line, width));
 
-				const theme = ctx.ui.theme;
 				const borderColor = (text: string) => this.borderColor(text);
 				const model = sanitizeLabel(ctx.model?.name || ctx.model?.id || "no model");
-				const thinking = pi.getThinkingLevel();
 				const status = ` ${theme.bold(theme.fg("muted", `${model} (${thinking})`))} `;
 				const result: string[] = [
 					`${borderColor("╭")}${borderColor("─".repeat(width - 2))}${borderColor("╮")}`,
@@ -344,7 +390,8 @@ export default function piStatusline(pi: ExtensionAPI) {
 			}
 		}
 
-		previousEditor = ctx.ui.getEditorComponent();
+		if (!editorInstalled) previousEditor = ctx.ui.getEditorComponent();
+		editorInstalled = true;
 		ctx.ui.setEditorComponent(
 			(tui, theme, keybindings) => new BoxedEditor(tui, theme, keybindings),
 		);
@@ -354,6 +401,7 @@ export default function piStatusline(pi: ExtensionAPI) {
 		if (ctx.mode !== "tui") return;
 		ctx.ui.setEditorComponent(previousEditor);
 		previousEditor = undefined;
+		editorInstalled = false;
 		ctx.ui.setFooter(undefined);
 	});
 }

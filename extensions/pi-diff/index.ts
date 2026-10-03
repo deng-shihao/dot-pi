@@ -9,6 +9,8 @@ import {
 	isEditToolResult,
 	isToolCallEventType,
 	isWriteToolResult,
+	withFileMutationQueue,
+	type Theme,
 } from "@earendil-works/pi-coding-agent";
 import type { SelectItem } from "@earendil-works/pi-tui";
 import {
@@ -20,12 +22,13 @@ import {
 	matchesKey,
 } from "@earendil-works/pi-tui";
 import { createHash } from "node:crypto";
-import { readFile, writeFile, rm, mkdir } from "node:fs/promises";
+import { readFile, realpath, writeFile, rm, mkdir } from "node:fs/promises";
 import { createTwoFilesPatch } from "diff";
-import { dirname, relative, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { homedir } from "node:os";
+import { fileURLToPath } from "node:url";
 
 // Custom session entry types
-// New name: pi-diff
 const ENTRY_BASELINE = "pi-diff:baseline";
 const ENTRY_CLEAR = "pi-diff:clear";
 const ENTRY_UPDATE = "pi-diff:update";
@@ -57,25 +60,44 @@ type PendingSnapshot = {
 	before: string | null;
 };
 
-function stripAtPrefix(p: string): string {
-	return p.startsWith("@") ? p.slice(1) : p;
-}
-
-function normalizeToolPath(
+async function normalizeToolPath(
 	cwd: string,
 	raw: string,
-): { absPath: string; relPath: string } {
-	const cleaned = stripAtPrefix(raw);
-	const absPath = resolve(cwd, cleaned);
-	// Use relative path for storage/UI when possible. If it escapes cwd, keep the cleaned input.
-	const rel = relative(cwd, absPath);
-	const relPath = rel && !rel.startsWith("..") && rel !== "" ? rel : cleaned;
+): Promise<{ absPath: string; relPath: string }> {
+	let cleaned = raw.replace(/[\u00a0\u2000-\u200a\u202f\u205f\u3000]/g, " ");
+	if (cleaned.startsWith("@")) cleaned = cleaned.slice(1);
+	if (cleaned === "~") cleaned = homedir();
+	if (cleaned.startsWith("~/")) cleaned = join(homedir(), cleaned.slice(2));
+	if (cleaned.startsWith("file://")) cleaned = fileURLToPath(cleaned);
+	const base = await realpath(cwd);
+	let ancestor = resolve(base, cleaned);
+	const missingSegments: string[] = [];
+	let absPath: string;
+	while (true) {
+		try {
+			absPath = resolve(await realpath(ancestor), ...missingSegments);
+			break;
+		} catch (error) {
+			if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+			const parent = dirname(ancestor);
+			if (parent === ancestor) throw error;
+			missingSegments.unshift(basename(ancestor));
+			ancestor = parent;
+		}
+	}
+	const rel = relative(base, absPath);
+	const relPath = rel && rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel) ? rel : absPath;
 	return { absPath, relPath };
 }
 
 async function readTextOrNull(absPath: string): Promise<string | null> {
 	try {
-		return await readFile(absPath, "utf-8");
+		const bytes = await readFile(absPath);
+		const text = bytes.toString("utf8");
+		if (!Buffer.from(text, "utf8").equals(bytes)) {
+			throw new Error(`pi-diff cannot safely snapshot non-UTF-8 file: ${absPath}`);
+		}
+		return text;
 	} catch (error) {
 		if (
 			typeof error === "object" &&
@@ -118,7 +140,7 @@ function formatAddedRemovedPlain(added: number, removed: number): string {
 	return `(+${added}/-${removed})`;
 }
 
-function styleAddedRemovedForList(theme: any, text: string): string {
+function styleAddedRemovedForList(theme: Theme, text: string): string {
 	// File rows use "+x/-y" as description; other rows use normal sentences.
 	const m = text.match(/^\+(\d+)\/-(\d+)$/);
 	if (!m) return theme.fg("muted", text);
@@ -138,7 +160,7 @@ function styleAddedRemovedForList(theme: any, text: string): string {
 
 function formatStatus(
 	tracked: Map<string, TrackedFile>,
-	theme?: any,
+	theme?: Theme,
 ): string | undefined {
 	if (tracked.size === 0) return undefined;
 	let edited = 0;
@@ -299,20 +321,25 @@ export default function (pi: ExtensionAPI) {
 	}
 
 	async function revertTrackedFile(item: TrackedFile): Promise<void> {
-		if (!item.recordedHash) {
-			throw new Error("no post-change fingerprint is stored for this legacy entry");
-		}
-		const current = await readTextOrNull(item.absPath);
-		if (hashContent(current) !== item.recordedHash) {
-			throw new Error("file changed after pi-diff recorded its latest state");
-		}
+		return withFileMutationQueue(item.absPath, async () => {
+			if (!item.recordedHash) {
+				throw new Error("no post-change fingerprint is stored for this legacy entry");
+			}
+			const current = await readTextOrNull(item.absPath);
+			if (hashContent(current) !== item.recordedHash) {
+				throw new Error("file changed after pi-diff recorded its latest state");
+			}
+			if (current !== null && await realpath(item.absPath) !== item.absPath) {
+				throw new Error("file target changed after pi-diff recorded its latest state");
+			}
 
-		if (item.originalContent === null) {
-			await rm(item.absPath, { force: true });
-		} else {
-			await ensureParentDir(item.absPath);
-			await writeFile(item.absPath, item.originalContent, "utf-8");
-		}
+			if (item.originalContent === null) {
+				await rm(item.absPath, { force: true });
+			} else {
+				await ensureParentDir(item.absPath);
+				await writeFile(item.absPath, item.originalContent, "utf-8");
+			}
+		});
 	}
 
 	async function declineAll(ctx: ExtensionCommandContext, force = false) {
@@ -357,6 +384,9 @@ export default function (pi: ExtensionAPI) {
 			updateUi(ctx);
 		}
 
+		if (!ctx.hasUI && errors.length > 0) {
+			throw new Error(`pi-diff: decline failed:\n${errors.join("\n")}`);
+		}
 		if (ctx.hasUI) {
 			if (errors.length === 0) {
 				ctx.ui.notify(
@@ -435,7 +465,7 @@ export default function (pi: ExtensionAPI) {
 					"error",
 				);
 			}
-			if (!ctx.hasUI) console.warn("[pi-diff] declineFile error:", error);
+			if (!ctx.hasUI) throw error;
 			return "failed";
 		}
 	}
@@ -702,7 +732,7 @@ export default function (pi: ExtensionAPI) {
 				return;
 			}
 			await ctx.waitForIdle();
-			const { relPath } = normalizeToolPath(ctx.cwd, args.trim());
+			const { relPath } = await normalizeToolPath(ctx.cwd, args.trim());
 			const ok = await acceptFile(ctx, relPath);
 			if (ctx.hasUI) {
 				if (ok) {
@@ -724,7 +754,12 @@ export default function (pi: ExtensionAPI) {
 				return;
 			}
 			await ctx.waitForIdle();
-			const { relPath } = normalizeToolPath(ctx.cwd, args.trim());
+			const force = args.trim().startsWith("--force ");
+			if (!ctx.hasUI && !force) {
+				throw new Error("Decline requires confirmation. Run: /pi-diff-decline-file --force <path>");
+			}
+			const path = force ? args.trim().slice("--force ".length).trim() : args.trim();
+			const { relPath } = await normalizeToolPath(ctx.cwd, path);
 			const outcome = await declineFile(ctx, relPath);
 			if (ctx.hasUI) {
 				if (outcome === "reverted") {
@@ -742,7 +777,9 @@ export default function (pi: ExtensionAPI) {
 		recordedHashes.clear();
 		pendingByToolCallId.clear();
 
-		// Replay custom entries on current branch
+		const cwd = await realpath(ctx.cwd);
+		// Stored paths already identify the original target. Do not follow a
+		// replacement symlink while replaying, or decline could restore another file.
 		for (const entry of ctx.sessionManager.getBranch()) {
 			if (entry.type !== "custom") continue;
 
@@ -761,10 +798,9 @@ export default function (pi: ExtensionAPI) {
 				) {
 					continue;
 				}
-				const { absPath, relPath } = normalizeToolPath(ctx.cwd, data.path);
-				baselines.set(relPath, {
-					path: relPath,
-					absPath,
+				baselines.set(data.path, {
+					path: data.path,
+					absPath: resolve(cwd, data.path),
 					originalContent: data.originalContent,
 				});
 				continue;
@@ -773,18 +809,16 @@ export default function (pi: ExtensionAPI) {
 			if (entry.customType === ENTRY_UPDATE) {
 				const data = entry.data as { path?: unknown; contentHash?: unknown };
 				if (typeof data?.path !== "string" || typeof data.contentHash !== "string") continue;
-				const { relPath } = normalizeToolPath(ctx.cwd, data.path);
-				recordedHashes.set(relPath, data.contentHash);
+				recordedHashes.set(data.path, data.contentHash);
 				continue;
 			}
 
 			if (entry.customType === ENTRY_UNTRACK) {
 				const data = entry.data as { path?: unknown };
 				if (typeof data?.path !== "string") continue;
-				const { relPath } = normalizeToolPath(ctx.cwd, data.path);
-				baselines.delete(relPath);
-				tracked.delete(relPath);
-				recordedHashes.delete(relPath);
+				baselines.delete(data.path);
+				tracked.delete(data.path);
+				recordedHashes.delete(data.path);
 			}
 		}
 
@@ -811,14 +845,13 @@ export default function (pi: ExtensionAPI) {
 		await rebuildFromSession(ctx);
 	});
 
-
 	// Capture before snapshots for edit/write
 	pi.on("tool_call", async (event, ctx) => {
 		if (
 			isToolCallEventType("edit", event) ||
 			isToolCallEventType("write", event)
 		) {
-			const { absPath, relPath } = normalizeToolPath(ctx.cwd, event.input.path);
+			const { absPath, relPath } = await normalizeToolPath(ctx.cwd, event.input.path);
 			const before = await readTextOrNull(absPath);
 			pendingByToolCallId.set(event.toolCallId, {
 				path: relPath,

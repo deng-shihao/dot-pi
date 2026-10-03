@@ -11,3 +11,4 @@ settings.json
 run-history.jsonl
 /.pi/tasks
 /extensions/herdr-agent-state.ts
+node_modules/

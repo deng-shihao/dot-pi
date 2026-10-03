@@ -277,13 +277,16 @@ export default function (pi: ExtensionAPI) {
     await pruneHistory(ctx);
   });
 
-  pi.on("session_shutdown", async () => {
+  async function clearHistory(): Promise<void> {
     const records = new Set(turnHistory.values());
     if (activeTurn) records.add(activeTurn);
     turnHistory.clear();
     activeTurn = undefined;
     await Promise.all([...records].map(disposeRecord));
-  });
+  }
+
+  pi.on("session_start", clearHistory);
+  pi.on("session_shutdown", clearHistory);
 
   pi.registerCommand("undo", {
     description:

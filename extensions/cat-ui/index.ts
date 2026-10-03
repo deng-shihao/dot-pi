@@ -1,9 +1,7 @@
 /**
  * cat-ui — A feline-accented TUI dashboard for pi.
  *
- * Replaces the built-in header with a gradient "pi" ASCII-art logo and
- * enriches the footer with model usage stats, git status, and extension
- * status lines.
+ * Replaces the built-in header with a gradient "pi" ASCII-art logo.
  *
  * Inspired by the pi monorepo's internal dashboard extension.
  */
@@ -19,15 +17,6 @@ import {
   visibleWidth,
 } from "@earendil-works/pi-tui";
 import { VERSION } from "@earendil-works/pi-coding-agent";
-import {
-  emptyGitInfoState,
-  emptyModelInfoState,
-  GIT_INFO_CHANNEL,
-  MODEL_INFO_CHANNEL,
-  REFRESH_CHANNEL,
-  isGitInfoState,
-  isModelInfoState,
-} from "./shared/dashboard-state.ts";
 
 type Rgb = [number, number, number];
 interface RenderableNode {
@@ -43,13 +32,13 @@ interface DashboardTui extends RenderableNode {
 const RESET = "\x1b[0m";
 const BOLD = "\x1b[1m";
 const PALETTE: Rgb[] = [
-  // Catppuccin Mocha gradient: blue → lavender → mauve (accent) → pink
-  [137, 180, 250],  // blue
-  [180, 190, 254],  // lavender
-  [203, 166, 247],  // mauve
-  [245, 194, 231],  // pink
-  [203, 166, 247],  // mauve
-  [180, 190, 254],  // lavender
+  // Rosé Pine Dawn gradient: pine → foam → iris (accent) → rose
+  [40, 105, 131],   // pine
+  [86, 148, 159],   // foam
+  [144, 122, 169],  // iris
+  [215, 130, 126],  // rose
+  [144, 122, 169],  // iris
+  [86, 148, 159],   // foam
 ];
 const TITLE_LINES = [
   "  ██████╗  ██╗ ",
@@ -155,12 +144,6 @@ function hideThemesSection(component: RenderableNode) {
   return false;
 }
 
-function formatTokens(tokens: number) {
-  if (tokens < 1_000) return `${tokens}`;
-  if (tokens < 1_000_000) return `${Math.round(tokens / 1_000)}k`;
-  return `${(tokens / 1_000_000).toFixed(1)}m`;
-}
-
 function formatDirectory(cwd: string) {
   const home = homedir();
   if (cwd === home) return "~";
@@ -173,45 +156,10 @@ function center(text: string, width: number) {
   return truncateToWidth(`${" ".repeat(padding)}${text}`, width);
 }
 
-function columns(left: string, right: string, width: number) {
-  if (!right) return truncateToWidth(left, width);
-
-  const naturalGap = width - visibleWidth(left) - visibleWidth(right);
-  if (naturalGap >= 1) return `${left}${" ".repeat(naturalGap)}${right}`;
-
-  const leftWidth = Math.max(1, Math.floor(width * 0.45));
-  const rightWidth = Math.max(1, width - leftWidth - 1);
-  const fittedLeft = truncateToWidth(left, leftWidth);
-  const fittedRight = truncateToWidth(right, rightWidth);
-  const gap = Math.max(
-    1,
-    width - visibleWidth(fittedLeft) - visibleWidth(fittedRight),
-  );
-  return truncateToWidth(
-    `${fittedLeft}${" ".repeat(gap)}${fittedRight}`,
-    width,
-  );
-}
-
 export default function uiCustomization(pi: ExtensionAPI) {
   let title = "pi";
-  let modelInfo = emptyModelInfoState();
-  let gitInfo = emptyGitInfoState();
-  let requestRender: (() => void) | undefined;
   let activeTui: DashboardTui | undefined;
   let themeRemovalTimers: Array<ReturnType<typeof setTimeout>> = [];
-
-  const stopModelListener = pi.events.on(MODEL_INFO_CHANNEL, (value) => {
-    if (!isModelInfoState(value)) return;
-    modelInfo = value;
-    requestRender?.();
-  });
-
-  const stopGitListener = pi.events.on(GIT_INFO_CHANNEL, (value) => {
-    if (!isGitInfoState(value)) return;
-    gitInfo = value;
-    requestRender?.();
-  });
 
   function scheduleThemeRemoval(tui: DashboardTui) {
     for (const timer of themeRemovalTimers) clearTimeout(timer);
@@ -231,7 +179,6 @@ export default function uiCustomization(pi: ExtensionAPI) {
 
     ctx.ui.setHeader((tui) => {
       activeTui = tui;
-      requestRender = () => tui.requestRender();
       scheduleThemeRemoval(tui);
 
       return {
@@ -249,16 +196,11 @@ export default function uiCustomization(pi: ExtensionAPI) {
       };
     });
 
-
-
     ctx.ui.setTitle(`pi · ${title}`);
-    pi.events.emit(REFRESH_CHANNEL, undefined);
   }
 
   pi.on("session_start", (_event, ctx) => {
     title = formatDirectory(ctx.cwd);
-    modelInfo = emptyModelInfoState();
-    gitInfo = emptyGitInfoState();
     install(ctx);
   });
 
@@ -267,12 +209,9 @@ export default function uiCustomization(pi: ExtensionAPI) {
   });
 
   pi.on("session_shutdown", (_event, ctx) => {
-    stopModelListener();
-    stopGitListener();
     for (const timer of themeRemovalTimers) clearTimeout(timer);
     themeRemovalTimers = [];
     activeTui = undefined;
-    requestRender = undefined;
     if (ctx.mode === "tui") {
       ctx.ui.setHeader(undefined);
     }

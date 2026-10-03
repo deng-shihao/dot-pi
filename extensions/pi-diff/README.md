@@ -30,9 +30,13 @@ If `ctx.hasUI` is false (print/json mode), accept/decline require explicit confi
 
 - `/pi-diff-accept force`
 - `/pi-diff-decline force`
+- `/pi-diff-decline-file --force <path>`
 
 ## Notes
 
-- Only tracks changes performed through `edit` and `write` tools.
+- Only tracks changes performed through `edit` and `write` tools. Non-UTF-8 originals are rejected before mutation because the persistent log stores text.
+- Paths support `@`, `~`, file URLs, and Unicode spaces, matching the local tool path conventions. Symlink aliases share a canonical baseline, including new files.
+- Replay preserves the recorded target path. Decline refuses a replacement symlink instead of writing to another file.
+- Decline uses Pi's file mutation queue and reports restore conflicts in headless mode as well as TUI mode.
 - To support "decline", the extension stores the original file contents (before the first pi change) in the session file as a custom entry.
 - Revert fingerprints each recorded post-change state and refuses to overwrite a file that changed afterward; failed files remain tracked for inspection or retry.

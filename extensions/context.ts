@@ -21,7 +21,6 @@ import type {
 	ContextUsage,
 	Theme,
 } from "@earendil-works/pi-coding-agent";
-import type { AssistantMessage, ToolResultMessage, UserMessage } from "@earendil-works/pi-ai";
 import { matchesKey, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 
 // ── Category definitions ──────────────────────────────────────────────
@@ -39,9 +38,23 @@ type MessageContentBlock =
 	| { type: "image" }
 	| { type: string; [key: string]: unknown };
 
-// Color helpers using ANSI 256-color codes for richer palette
-const ansi256Fg = (code: number, text: string) => `\x1b[38;5;${code}m${text}\x1b[0m`;
-const ansi256Bg = (code: number, text: string) => `\x1b[48;5;${code}m${text}\x1b[0m`;
+// Rosé Pine Dawn: https://rosepinetheme.com/palette/
+const dawn = {
+	love: 0xb4637a,
+	gold: 0xea9d34,
+	rose: 0xd7827e,
+	pine: 0x286983,
+	foam: 0x56949f,
+	iris: 0x907aa9,
+	muted: 0x9893a5,
+	subtle: 0x797593,
+	highlightMed: 0xdfdad9,
+} as const;
+
+const ansiRgbFg = (color: number, text: string) =>
+	`\x1b[38;2;${color >> 16};${(color >> 8) & 255};${color & 255}m${text}\x1b[0m`;
+const ansiRgbBg = (color: number, text: string) =>
+	`\x1b[48;2;${color >> 16};${(color >> 8) & 255};${color & 255}m${text}\x1b[0m`;
 
 // ── Token estimation for individual messages ──────────────────────────
 
@@ -83,11 +96,10 @@ function computeBreakdown(ctx: ExtensionCommandContext): ContextBreakdown | null
 	if (!usage) return null;
 
 	const { contextWindow } = usage;
-	const contextEntries = ctx.sessionManager.buildContextEntries();
+	const messages = ctx.sessionManager.buildSessionProjection().messages;
 	const branch = ctx.sessionManager.getBranch();
 
 	// Accumulators
-	let systemPromptTokens = 0;
 	let userTokens = 0;
 	let assistantTextTokens = 0;
 	let thinkingTokens = 0;
@@ -101,89 +113,54 @@ function computeBreakdown(ctx: ExtensionCommandContext): ContextBreakdown | null
 	let turnCount = 0;
 	let messageCount = 0;
 
-	// Estimate system prompt tokens
-	try {
-		const sysPrompt = ctx.getSystemPrompt();
-		if (sysPrompt) {
-			systemPromptTokens = estimateStringTokens(sysPrompt);
-		}
-	} catch {
-		// May not be available outside of a turn
-		systemPromptTokens = 0;
-	}
+	const systemPromptTokens = estimateStringTokens(ctx.getSystemPrompt());
 
-	for (const entry of contextEntries) {
-		if (entry.type === "message") {
-			const msg = entry.message;
-
-			if (msg.role === "user") {
-				const um = msg as UserMessage;
-				const content = um.content;
-				if (typeof content === "string") {
-					userTokens += estimateStringTokens(content);
-				} else if (Array.isArray(content)) {
-					for (const block of content) {
-						if (block.type === "text") {
-							userTokens += estimateStringTokens(block.text);
-						} else if (block.type === "image") {
-							imageTokens += 1600;
-						}
-					}
+	// Count projected messages, not raw entries superseded by context edits.
+	for (const msg of messages) {
+		if (msg.role === "user") {
+			if (typeof msg.content === "string") {
+				userTokens += estimateStringTokens(msg.content);
+			} else {
+				for (const block of msg.content) {
+					if (block.type === "text") userTokens += estimateStringTokens(block.text);
+					else if (block.type === "image") imageTokens += 1600;
 				}
-			} else if (msg.role === "assistant") {
-				const am = msg as AssistantMessage;
-
-				for (const block of am.content) {
-					if (block.type === "text") {
-						assistantTextTokens += estimateStringTokens(block.text);
-					} else if (block.type === "thinking") {
-						// Thinking tokens are in the output but we estimate content size
-						thinkingTokens += estimateStringTokens(block.thinking);
-					}
-					if (block.type === "toolCall") {
-						assistantTextTokens += estimateStringTokens(
-							JSON.stringify(block.arguments),
-						);
-					}
-				}
-			} else if (msg.role === "toolResult") {
-				const tr = msg as ToolResultMessage;
-				const name = tr.toolName || "unknown";
-				const tokens = estimateContentTokens(tr.content);
-				toolTokens[name] = (toolTokens[name] ?? 0) + tokens;
 			}
-		} else if (entry.type === "compaction") {
-			compactionTokens += estimateStringTokens(entry.summary ?? "");
-		} else if (entry.type === "custom_message") {
-			const content = entry.content;
-			if (typeof content === "string") {
-				customMessageTokens += estimateStringTokens(content);
-			} else if (Array.isArray(content)) {
-				customMessageTokens += estimateContentTokens(content);
+		} else if (msg.role === "assistant") {
+			for (const block of msg.content) {
+				if (block.type === "text") assistantTextTokens += estimateStringTokens(block.text);
+				else if (block.type === "thinking") thinkingTokens += estimateStringTokens(block.thinking);
+				else if (block.type === "toolCall") assistantTextTokens += estimateStringTokens(JSON.stringify(block.arguments));
 			}
-		} else if (entry.type === "branch_summary") {
-			compactionTokens += estimateStringTokens(entry.summary ?? "");
+		} else if (msg.role === "toolResult") {
+			toolTokens[msg.toolName] = (toolTokens[msg.toolName] ?? 0) + estimateContentTokens(msg.content);
+		} else if (msg.role === "compactionSummary" || msg.role === "branchSummary") {
+			compactionTokens += estimateStringTokens(msg.summary);
+		} else if (msg.role === "custom") {
+			customMessageTokens += estimateContentTokens(msg.content);
+		} else if (msg.role === "bashExecution" && !msg.excludeFromContext) {
+			toolTokens.bash = (toolTokens.bash ?? 0) + estimateStringTokens(msg.command + msg.output);
 		}
 	}
 
 	// Usage and cost are session totals, while the category breakdown above is
 	// limited to the compaction-aware context currently sent to the model.
-	cacheRead = 0;
-	cacheWrite = 0;
-	totalCost = 0;
-	turnCount = 0;
-	messageCount = 0;
 	for (const entry of branch) {
 		if (entry.type === "message") {
 			messageCount++;
 			if (entry.message.role === "assistant") {
 				turnCount++;
-				cacheRead += entry.message.usage.cacheRead;
-				cacheWrite += entry.message.usage.cacheWrite;
-				totalCost += entry.message.usage.cost.total;
+			}
+			if (entry.message.role === "assistant" || entry.message.role === "toolResult") {
+				const usage = entry.message.usage;
+				if (usage) {
+					cacheRead += usage.cacheRead;
+					cacheWrite += usage.cacheWrite;
+					totalCost += usage.cost.total;
+				}
 			}
 		} else if (
-			(entry.type === "compaction" || entry.type === "branch_summary") &&
+			(entry.type === "compaction" || entry.type === "branch_summary" || entry.type === "usage") &&
 			entry.usage
 		) {
 			cacheRead += entry.usage.cacheRead;
@@ -208,56 +185,56 @@ function computeBreakdown(ctx: ExtensionCommandContext): ContextBreakdown | null
 	};
 
 	addCat("system", "System Prompt", systemPromptTokens,
-		(th, t) => ansi256Fg(141, t), ansi256Bg(141, "  ")); // Purple
+		(_th, t) => ansiRgbFg(dawn.iris, t), ansiRgbBg(dawn.iris, "  "));
 
 	addCat("user", "User Messages", userTokens,
-		(th, t) => ansi256Fg(75, t), ansi256Bg(75, "  ")); // Blue
+		(_th, t) => ansiRgbFg(dawn.foam, t), ansiRgbBg(dawn.foam, "  "));
 
 	addCat("assistant", "Assistant Text", assistantTextTokens,
-		(th, t) => ansi256Fg(114, t), ansi256Bg(114, "  ")); // Green
+		(_th, t) => ansiRgbFg(dawn.pine, t), ansiRgbBg(dawn.pine, "  "));
 
 	addCat("thinking", "Thinking", thinkingTokens,
-		(th, t) => ansi256Fg(216, t), ansi256Bg(216, "  ")); // Orange
+		(_th, t) => ansiRgbFg(dawn.gold, t), ansiRgbBg(dawn.gold, "  "));
 
 	// Tool categories — sorted by tokens descending
-	const builtinTools: Record<string, { label: string; colorCode: number }> = {
-		read: { label: "Tool: read", colorCode: 73 },      // Teal
-		bash: { label: "Tool: bash", colorCode: 167 },     // Red
-		edit: { label: "Tool: edit", colorCode: 179 },     // Gold
-		write: { label: "Tool: write", colorCode: 143 },   // Olive
-		grep: { label: "Tool: grep", colorCode: 109 },     // Steel blue
-		find: { label: "Tool: find", colorCode: 146 },     // Light purple
-		ls: { label: "Tool: ls", colorCode: 108 },         // Sage
-		subagent: { label: "Tool: subagent", colorCode: 175 }, // Pink
-		web_search: { label: "Tool: web_search", colorCode: 74 },
-		web_fetch: { label: "Tool: web_fetch", colorCode: 38 },
-		ask_user_question: { label: "Tool: ask_user", colorCode: 183 },
-		video_extract: { label: "Tool: video", colorCode: 204 },
-		google_image_search: { label: "Tool: img_search", colorCode: 214 },
-		youtube_search: { label: "Tool: yt_search", colorCode: 196 },
+	const builtinTools: Record<string, { label: string; color: number }> = {
+		read: { label: "Tool: read", color: dawn.foam },
+		bash: { label: "Tool: bash", color: dawn.love },
+		edit: { label: "Tool: edit", color: dawn.gold },
+		write: { label: "Tool: write", color: dawn.rose },
+		grep: { label: "Tool: grep", color: dawn.pine },
+		find: { label: "Tool: find", color: dawn.iris },
+		ls: { label: "Tool: ls", color: dawn.subtle },
+		subagent: { label: "Tool: subagent", color: dawn.iris },
+		web_search: { label: "Tool: web_search", color: dawn.foam },
+		web_fetch: { label: "Tool: web_fetch", color: dawn.pine },
+		ask_user_question: { label: "Tool: ask_user", color: dawn.rose },
+		video_extract: { label: "Tool: video", color: dawn.love },
+		google_image_search: { label: "Tool: img_search", color: dawn.gold },
+		youtube_search: { label: "Tool: yt_search", color: dawn.love },
 	};
 
 	// Custom tool fallback colors
-	const customToolColors = [132, 166, 130, 97, 136, 169, 103, 172];
+	const customToolColors = [dawn.iris, dawn.rose, dawn.pine, dawn.love, dawn.gold, dawn.foam];
 	let customColorIdx = 0;
 
 	const sortedTools = Object.entries(toolTokens).sort((a, b) => b[1] - a[1]);
 	for (const [name, tokens] of sortedTools) {
 		const builtin = builtinTools[name];
-		const colorCode = builtin?.colorCode ?? customToolColors[customColorIdx++ % customToolColors.length]!;
+		const color = builtin?.color ?? customToolColors[customColorIdx++ % customToolColors.length]!;
 		const label = builtin?.label ?? `Tool: ${name}`;
 		addCat(`tool:${name}`, label, tokens,
-			(_th, t) => ansi256Fg(colorCode, t), ansi256Bg(colorCode, "  "));
+			(_th, t) => ansiRgbFg(color, t), ansiRgbBg(color, "  "));
 	}
 
 	addCat("compaction", "Compaction", compactionTokens,
-		(th, t) => ansi256Fg(245, t), ansi256Bg(245, "  ")); // Gray
+		(_th, t) => ansiRgbFg(dawn.subtle, t), ansiRgbBg(dawn.subtle, "  "));
 
 	addCat("custom", "Custom Messages", customMessageTokens,
-		(th, t) => ansi256Fg(183, t), ansi256Bg(183, "  ")); // Lavender
+		(_th, t) => ansiRgbFg(dawn.iris, t), ansiRgbBg(dawn.iris, "  "));
 
 	addCat("images", "Images", imageTokens,
-		(th, t) => ansi256Fg(219, t), ansi256Bg(219, "  ")); // Pink
+		(_th, t) => ansiRgbFg(dawn.rose, t), ansiRgbBg(dawn.rose, "  "));
 
 	// Calculate used tokens from categories
 	const usedFromCategories = categories.reduce((s, c) => s + c.tokens, 0);
@@ -271,8 +248,8 @@ function computeBreakdown(ctx: ExtensionCommandContext): ContextBreakdown | null
 		key: "free",
 		label: "Free",
 		tokens: freeTokens,
-		color: (_th, t) => ansi256Fg(240, t),
-		square: ansi256Bg(236, "  "), // Dark gray
+		color: (_th, t) => ansiRgbFg(dawn.muted, t),
+		square: ansiRgbBg(dawn.highlightMed, "  "),
 	});
 
 	return {
@@ -293,7 +270,6 @@ function computeBreakdown(ctx: ExtensionCommandContext): ContextBreakdown | null
 function renderGrid(
 	breakdown: ContextBreakdown,
 	width: number,
-	theme: Theme,
 ): string[] {
 	const lines: string[] = [];
 	const squareW = 2; // Each grid cell is 2 chars wide
@@ -303,27 +279,21 @@ function renderGrid(
 	// Target ~10-15 rows of grid for good visual density
 	const targetRows = Math.min(15, Math.max(6, Math.floor(width / 8)));
 	const cellsTotal = cols * targetRows;
-	const tokensPerCell = breakdown.contextWindow / cellsTotal;
+	const estimatedUsed = breakdown.categories.filter((cat) => cat.key !== "free")
+		.reduce((total, cat) => total + cat.tokens, 0);
+	const usedFraction = Math.max(0, Math.min(1, breakdown.totalTokens / breakdown.contextWindow));
+	const usedCells = Math.round(cellsTotal * usedFraction);
 
 	// Build cell array
 	const cells: string[] = [];
-	let cellIdx = 0;
-	for (const cat of breakdown.categories) {
-		const numCells = Math.max(
-			cat.tokens > 0 && cat.key !== "free" ? 1 : 0,
-			Math.round(cat.tokens / tokensPerCell),
-		);
-		for (let i = 0; i < numCells && cellIdx < cellsTotal; i++) {
-			cells.push(cat.square);
-			cellIdx++;
-		}
+	let cumulativeTokens = 0;
+	for (const cat of breakdown.categories.filter((cat) => cat.key !== "free")) {
+		cumulativeTokens += cat.tokens;
+		const end = Math.round((cumulativeTokens / estimatedUsed) * usedCells);
+		while (cells.length < end) cells.push(cat.square);
 	}
-	// Fill remaining with free space
-	while (cellIdx < cellsTotal) {
-		const freeCat = breakdown.categories.find((c) => c.key === "free");
-		cells.push(freeCat?.square ?? ansi256Bg(236, "  "));
-		cellIdx++;
-	}
+	const freeSquare = breakdown.categories.find((cat) => cat.key === "free")!.square;
+	while (cells.length < cellsTotal) cells.push(freeSquare);
 
 	// Calculate grid width and centering padding
 	const gridW = cols * squareW;
@@ -357,6 +327,7 @@ function buildOverlay(
 	theme: Theme,
 	width: number,
 ): string[] {
+	if (width < 4) return [truncateToWidth("Context", Math.max(0, width), "")];
 	const lines: string[] = [];
 	const innerW = width - 2; // two border chars (│ on each side)
 
@@ -392,7 +363,7 @@ function buildOverlay(
 	lines.push(emptyRow());
 
 	// Grid — render into innerW and wrap with borders
-	const gridLines = renderGrid(breakdown, innerW, theme);
+	const gridLines = renderGrid(breakdown, innerW);
 	for (const gl of gridLines) {
 		lines.push(
 			theme.fg("border", "│") +
@@ -538,7 +509,7 @@ export default function (pi: ExtensionAPI) {
 			}
 
 			await ctx.ui.custom<void>(
-				(tui, theme, _keybindings, done) => {
+				(_tui, theme, _keybindings, done) => {
 					const cachedBreakdown = breakdown;
 
 					return {

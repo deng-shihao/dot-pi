@@ -1,7 +1,7 @@
 {
   "name": "cat-ui",
   "version": "1.0.0",
-  "description": "A feline-accented TUI dashboard for pi — gradient logo header, model stats, git status, and extension statuses in the footer.",
+  "description": "A gradient logo header for the pi TUI.",
   "keywords": ["pi-package", "pi-extension", "dashboard"],
   "license": "MIT",
   "pi": {
@@ -9,7 +9,6 @@
   },
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": "*",
-    "@earendil-works/pi-tui": "*",
-    "@earendil-works/pi-ai": "*"
+    "@earendil-works/pi-tui": "*"
   }
 }

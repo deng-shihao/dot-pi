@@ -1,0 +1,32 @@
+[
+  {
+    "timestamp": "2026-10-03T10:05:58.712Z",
+    "version": "1.0.0",
+    "kind": "uncaught_exception",
+    "message": "Unknown theme color: #56949f",
+    "stack": "Error: Unknown theme color: #56949f\n    at Theme.tokenAnsi (file:///Users/dsh/.bun/install/global/node_modules/@earendil-works/pi-coding-agent/dist/bundle/chunks/chunk-2KTBZM5G.js:126:20181)\n    at Theme.style (file:///Users/dsh/.bun/install/global/node_modules/@earendil-works/pi-coding-agent/dist/bundle/chunks/chunk-2KTBZM5G.js:126:19720)\n    at Object.render (/Users/dsh/.pi/agent/extensions/pi-statusline/index.ts:305:19)\n    at Container.render (file:///Users/dsh/.bun/install/global/node_modules/@earendil-works/pi-coding-agent/dist/bundle/chunks/chunk-2KTBZM5G.js:71:28902)\n    at file:///Users/dsh/.bun/install/global/node_modules/@earendil-works/pi-coding-agent/dist/bundle/chunks/chunk-2KTBZM5G.js:106:801\n    at Array.map (<anonymous>)\n    at VStack.render (file:///Users/dsh/.bun/install/global/node_modules/@earendil-works/pi-coding-agent/dist/bundle/chunks/chunk-2KTBZM5G.js:106:774)\n    at renderCached (file:///Users/dsh/.bun/install/global/node_modules/@earendil-works/pi-coding-agent/dist/bundle/chunks/chunk-2KTBZM5G.js:106:26650)\n    at measureHeight (file:///Users/dsh/.bun/install/global/node_modules/@earendil-works/pi-coding-agent/dist/bundle/chunks/chunk-2KTBZM5G.js:106:26758)\n    at file:///Users/dsh/.bun/install/global/node_modules/@earendil-works/pi-coding-agent/dist/bundle/chunks/chunk-2KTBZM5G.js:106:29035\n    at Array.map (<anonymous>)\n    at layoutComponent (file:///Users/dsh/.bun/install/global/node_modules/@earendil-works/pi-coding-agent/dist/bundle/chunks/chunk-2KTBZM5G.js:106:28983)\n    at renderLayoutFrame (file:///Users/dsh/.bun/install/global/node_modules/@earendil-works/pi-coding-agent/dist/bundle/chunks/chunk-2KTBZM5G.js:106:35224)\n    at TuiAltScreen.doRender (file:///Users/dsh/.bun/install/global/node_modules/@earendil-works/pi-coding-agent/dist/bundle/chunks/chunk-2KTBZM5G.js:109:6567)\n    at Timeout._onTimeout (file:///Users/dsh/.bun/install/global/node_modules/@earendil-works/pi-coding-agent/dist/bundle/chunks/chunk-2KTBZM5G.js:71:41188)\n    at listOnTimeout (node:internal/timers:685:17)\n    at process.processTimers (node:internal/timers:618:7)",
+    "sessionFile": "/Users/dsh/.pi/agent/sessions/--Users-dsh-.pi-agent--/2026-10-03T09-34-08-423Z_01a1011d-2027-71ca-bec2-e992029a1e54.jsonl",
+    "cwd": "/Users/dsh/.pi/agent",
+    "notified": true
+  },
+  {
+    "timestamp": "2026-10-03T10:07:14.958Z",
+    "version": "1.0.0",
+    "kind": "uncaught_exception",
+    "message": "Unknown theme color: #56949f",
+    "stack": "Error: Unknown theme color: #56949f\n    at Theme.tokenAnsi (file:///Users/dsh/.bun/install/global/node_modules/@earendil-works/pi-coding-agent/dist/bundle/chunks/chunk-2KTBZM5G.js:126:20181)\n    at Theme.style (file:///Users/dsh/.bun/install/global/node_modules/@earendil-works/pi-coding-agent/dist/bundle/chunks/chunk-2KTBZM5G.js:126:19720)\n    at Object.render (/Users/dsh/.pi/agent/extensions/pi-statusline/index.ts:305:19)\n    at Container.render (file:///Users/dsh/.bun/install/global/node_modules/@earendil-works/pi-coding-agent/dist/bundle/chunks/chunk-2KTBZM5G.js:71:28902)\n    at file:///Users/dsh/.bun/install/global/node_modules/@earendil-works/pi-coding-agent/dist/bundle/chunks/chunk-2KTBZM5G.js:106:801\n    at Array.map (<anonymous>)\n    at VStack.render (file:///Users/dsh/.bun/install/global/node_modules/@earendil-works/pi-coding-agent/dist/bundle/chunks/chunk-2KTBZM5G.js:106:774)\n    at renderCached (file:///Users/dsh/.bun/install/global/node_modules/@earendil-works/pi-coding-agent/dist/bundle/chunks/chunk-2KTBZM5G.js:106:26650)\n    at measureHeight (file:///Users/dsh/.bun/install/global/node_modules/@earendil-works/pi-coding-agent/dist/bundle/chunks/chunk-2KTBZM5G.js:106:26758)\n    at file:///Users/dsh/.bun/install/global/node_modules/@earendil-works/pi-coding-agent/dist/bundle/chunks/chunk-2KTBZM5G.js:106:29035",
+    "sessionFile": "/Users/dsh/.pi/agent/sessions/--Users-dsh-.pi-agent--/2026-10-03T10-07-14-674Z_01a1013b-6ef2-7008-ad4c-187ed6036c66.jsonl",
+    "cwd": "/Users/dsh/.pi/agent",
+    "notified": true
+  },
+  {
+    "timestamp": "2026-10-03T10:07:27.946Z",
+    "version": "1.0.0",
+    "kind": "uncaught_exception",
+    "message": "Unknown theme color: #56949f",
+    "stack": "Error: Unknown theme color: #56949f\n    at Theme.tokenAnsi (file:///Users/dsh/.bun/install/global/node_modules/@earendil-works/pi-coding-agent/dist/bundle/chunks/chunk-2KTBZM5G.js:126:20181)\n    at Theme.style (file:///Users/dsh/.bun/install/global/node_modules/@earendil-works/pi-coding-agent/dist/bundle/chunks/chunk-2KTBZM5G.js:126:19720)\n    at Object.render (/Users/dsh/.pi/agent/extensions/pi-statusline/index.ts:305:19)\n    at Container.render (file:///Users/dsh/.bun/install/global/node_modules/@earendil-works/pi-coding-agent/dist/bundle/chunks/chunk-2KTBZM5G.js:71:28902)\n    at file:///Users/dsh/.bun/install/global/node_modules/@earendil-works/pi-coding-agent/dist/bundle/chunks/chunk-2KTBZM5G.js:106:801\n    at Array.map (<anonymous>)\n    at VStack.render (file:///Users/dsh/.bun/install/global/node_modules/@earendil-works/pi-coding-agent/dist/bundle/chunks/chunk-2KTBZM5G.js:106:774)\n    at renderCached (file:///Users/dsh/.bun/install/global/node_modules/@earendil-works/pi-coding-agent/dist/bundle/chunks/chunk-2KTBZM5G.js:106:26650)\n    at measureHeight (file:///Users/dsh/.bun/install/global/node_modules/@earendil-works/pi-coding-agent/dist/bundle/chunks/chunk-2KTBZM5G.js:106:26758)\n    at file:///Users/dsh/.bun/install/global/node_modules/@earendil-works/pi-coding-agent/dist/bundle/chunks/chunk-2KTBZM5G.js:106:29035",
+    "sessionFile": "/Users/dsh/.pi/agent/sessions/--Users-dsh-.pi-agent--/2026-10-03T09-34-08-423Z_01a1011d-2027-71ca-bec2-e992029a1e54.jsonl",
+    "cwd": "/Users/dsh/.pi/agent",
+    "notified": true
+  }
+]
